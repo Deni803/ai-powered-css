@@ -1,0 +1,14 @@
+{
+  "doc_id": "bms-calculating-the-heart-rating-bookmyshow-support-centre-c5a50fcffa",
+  "title": "Calculating the heart rating : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "hi",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081424-calculating-the-heart-rating",
+  "fetched_at": "2026-01-28T04:20:12.460837+00:00",
+  "content_hash": "072f72eeeafb7eead32b7e39839f2ae73e4c05b79611c6cf52cfbabc463fc197",
+  "body": "फिल्म के पृष्ठ पर प्रदर्शित हृदय रेटिंग की गणना कैसे की जाती है?\nएक फिल्म के लिए हृदय रेटिंग प्रदर्शित करने के लिए न्यूनतम वोटों की एक सीमा होनी चाहिए। हम किसी फिल्म के लिए हृदय रेटिंग भी प्रदर्शित नहीं करते हैं जब तक कि इसे वास्तव में प्रदर्शित/रिलीज़ नहीं किया गया हो।\nरेटिंग एल्गोरिदम एक जटिल सूत्र है जो टिकट खरीदारों, गैर-लेनदेन करने वाले उपयोगकर्ताओं और आलोचक समीक्षाओं से रेटिंग का भारित औसत गणना करता है। सूत्र इस तरह से डिज़ाइन किया गया है कि टिकट खरीदारों से मिली रेटिंग का फिल्म की समग्र हृदय रेटिंग पर अधिकतम प्रभाव होता है। एल्गोरिदम को स्पैम पैटर्न का पता लगाने और नकली रेटिंग की पहचान करने के लिए भी लगातार अपडेट किया जाता है।",
+  "translated_from": "bms-calculating-the-heart-rating-bookmyshow-support-centre-c5a50fcffa",
+  "translation_model": "gpt-4o-mini",
+  "translation_at": "2026-01-28T05:05:53.218453+00:00"
+}

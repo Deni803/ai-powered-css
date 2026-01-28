@@ -1,0 +1,422 @@
+{% extends "templates/web.html" %}
+
+{% block page_content %}
+<div class="ai-css-chat">
+  <div class="ai-css-chat__header">
+    <div>
+      <h2 class="ai-css-chat__title">Support Chat</h2>
+      <div class="ai-css-chat__subtitle">BookMyShow Assistant (EN/HI)</div>
+    </div>
+    <div class="ai-css-chat__controls">
+      <div class="ai-css-chat__status" id="status-indicator">
+        <span class="dot"></span>
+        <span class="label">Disconnected</span>
+      </div>
+      <button id="new-chat-btn" class="btn btn-sm btn-secondary">New Chat</button>
+      <button id="toggle-details" class="btn btn-sm btn-default">Show details</button>
+      <select id="lang-select" class="form-control">
+        <option value="auto">Auto</option>
+        <option value="en">English</option>
+        <option value="hi">Hindi</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="ai-css-chat__messages" id="message-list"></div>
+
+  <div class="ai-css-chat__typing" id="typing-indicator" style="display:none;">Assistant is typing…</div>
+
+  <div class="ai-css-chat__banner" id="ticket-banner" style="display:none;"></div>
+
+  <div class="ai-css-chat__input">
+    <textarea id="chat-input" class="form-control" rows="2" placeholder="Ask a question…"></textarea>
+    <button id="send-btn" class="btn btn-primary">Send</button>
+  </div>
+</div>
+
+<style>
+.ai-css-chat {
+  max-width: 900px;
+  margin: 20px auto;
+  background: #ffffff;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  padding: 16px;
+}
+.ai-css-chat__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #efefef;
+  padding-bottom: 12px;
+}
+.ai-css-chat__title {
+  margin: 0;
+  font-size: 22px;
+}
+.ai-css-chat__subtitle {
+  font-size: 13px;
+  color: #6b6b6b;
+}
+.ai-css-chat__controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.ai-css-chat__controls .btn {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.ai-css-chat__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b6b6b;
+}
+.ai-css-chat__status .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d9534f;
+}
+.ai-css-chat__messages {
+  min-height: 320px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 16px 0;
+}
+.message {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  max-width: 75%;
+  white-space: pre-wrap;
+}
+.message.user {
+  background: #f5f5f5;
+  margin-left: auto;
+}
+.message.assistant {
+  background: #fdf7f0;
+  border: 1px solid #f1e2d3;
+}
+.message .meta {
+  font-size: 11px;
+  color: #777;
+  margin-top: 6px;
+}
+.details {
+  display: none;
+}
+.ai-css-chat.show-details .details {
+  display: block;
+}
+.sources {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.sources a {
+  color: #3273dc;
+}
+.ai-css-chat__typing {
+  font-size: 12px;
+  color: #777;
+  margin: 6px 0 12px;
+}
+.ai-css-chat__banner {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #fff6d6;
+  border: 1px solid #ffe49b;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.ai-css-chat__input {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  border-top: 1px solid #efefef;
+  padding-top: 12px;
+}
+.ai-css-chat__input textarea {
+  flex: 1;
+}
+.quick-replies {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-replies button {
+  font-size: 12px;
+}
+</style>
+
+<script>
+(function () {
+  const container = document.querySelector(".ai-css-chat");
+  const messageList = document.getElementById("message-list");
+  const input = document.getElementById("chat-input");
+  const sendBtn = document.getElementById("send-btn");
+  const typing = document.getElementById("typing-indicator");
+  const status = document.getElementById("status-indicator");
+  const banner = document.getElementById("ticket-banner");
+  const langSelect = document.getElementById("lang-select");
+  const newChatBtn = document.getElementById("new-chat-btn");
+  const toggleDetailsBtn = document.getElementById("toggle-details");
+
+  const STORAGE_KEY = "ai_css_chat_session";
+  const MESSAGE_KEY = "ai_css_chat_messages";
+
+  function getSessionId() {
+    const existing = localStorage.getItem(STORAGE_KEY);
+    if (existing) return existing;
+    const newId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+    localStorage.setItem(STORAGE_KEY, newId);
+    return newId;
+  }
+
+  function setStatus(ok, text) {
+    status.querySelector(".dot").style.background = ok ? "#3cba54" : "#d9534f";
+    status.querySelector(".label").textContent = text;
+  }
+
+  function detectLanguage(text) {
+    for (const ch of text) {
+      if (ch >= "\u0900" && ch <= "\u097F") return "hi";
+    }
+    return "en";
+  }
+
+  function loadMessages() {
+    const raw = localStorage.getItem(MESSAGE_KEY);
+    if (!raw) return [];
+    try {
+      const items = JSON.parse(raw);
+      if (!Array.isArray(items)) return [];
+      return items.map(msg => {
+        if (msg.role === "assistant") {
+          if (!msg.content) {
+            msg.content = "Sorry, something went wrong. Please try again.";
+          }
+          if (msg.confidence === undefined || msg.confidence === null) {
+            msg.confidence = 0;
+          }
+        }
+        return msg;
+      });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveMessages(messages) {
+    localStorage.setItem(MESSAGE_KEY, JSON.stringify(messages.slice(-20)));
+  }
+
+  function renderMessages(messages) {
+    messageList.innerHTML = "";
+    messages.slice(-20).forEach((msg, idx) => renderMessage(msg, idx, messages));
+    messageList.scrollTop = messageList.scrollHeight;
+  }
+
+  function renderMessage(msg, index, messages) {
+    const div = document.createElement("div");
+    div.className = `message ${msg.role}`;
+    div.textContent = msg.content;
+    if (msg.role === "assistant") {
+      const details = document.createElement("div");
+      details.className = "details";
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = `confidence: ${msg.confidence ?? "n/a"}`;
+      details.appendChild(meta);
+      if (msg.sources && msg.sources.length) {
+        const src = document.createElement("div");
+        src.className = "sources";
+        src.innerHTML = "Sources: " + msg.sources.map(s => {
+          const label = s.title || s.doc_id || "source";
+          if (s.source_url) {
+            return `<a href="${s.source_url}" target="_blank" rel="noopener">${label}</a> (${(s.score || 0).toFixed(2)})`;
+          }
+          return `${label} (${(s.score || 0).toFixed(2)})`;
+        }).join(" · ");
+        details.appendChild(src);
+      }
+      div.appendChild(details);
+      if (msg.escalation_offered && !(msg.quick_replies && msg.quick_replies.length)) {
+        const actions = document.createElement("div");
+        actions.className = "sources";
+        actions.innerHTML = `
+          <button class="btn btn-sm btn-primary" data-action="create">Create Ticket</button>
+          <button class="btn btn-sm btn-secondary" data-action="continue">Continue Chat</button>
+        `;
+        actions.querySelector('[data-action="create"]').addEventListener("click", () => {
+          createTicket(index);
+        });
+        actions.querySelector('[data-action="continue"]').addEventListener("click", () => {
+          msg.escalation_offered = false;
+          saveMessages(messages);
+          renderMessages(messages);
+        });
+        div.appendChild(actions);
+      }
+      if (msg.quick_replies && msg.quick_replies.length) {
+        const quick = document.createElement("div");
+        quick.className = "quick-replies";
+        msg.quick_replies.forEach(text => {
+          const btn = document.createElement("button");
+          btn.className = "btn btn-sm btn-secondary";
+          btn.textContent = text;
+          btn.addEventListener("click", () => sendMessage(text));
+          quick.appendChild(btn);
+        });
+        div.appendChild(quick);
+      }
+    }
+    messageList.appendChild(div);
+  }
+
+  async function createTicket(messageIndex) {
+    const sessionId = getSessionId();
+    setStatus(false, "Creating ticket…");
+    try {
+      const res = await fetch("/api/method/ai_powered_css.api.chat.create_ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || ""
+        },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      const data = await res.json();
+      const payload = data.message || data;
+      if (!payload.ticket_id) {
+        throw new Error("ticket_id missing");
+      }
+      const messages = loadMessages();
+      if (messages[messageIndex]) {
+        messages[messageIndex].escalation_offered = false;
+        messages[messageIndex].ticket_id = payload.ticket_id;
+        messages[messageIndex].ticket_type = payload.ticket_type;
+      }
+      const lang = (messages[messageIndex] && messages[messageIndex].language) || langSelect.value;
+      banner.textContent = lang === "hi"
+        ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`
+        : `Ticket created: #${payload.ticket_id}`;
+      banner.style.display = "block";
+      saveMessages(messages);
+      renderMessages(messages);
+      setStatus(true, "Connected");
+    } catch (err) {
+      setStatus(false, "Error");
+      banner.textContent = "Unable to create ticket. Please try again.";
+      banner.style.display = "block";
+    }
+  }
+
+  function setNewSession() {
+    const newId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
+    localStorage.setItem(STORAGE_KEY, newId);
+    return newId;
+  }
+
+  async function sendMessage(overrideText) {
+    const text = (overrideText || input.value).trim();
+    if (!text) return;
+
+    banner.style.display = "none";
+    const messages = loadMessages();
+    const userMsg = { role: "user", content: text };
+    messages.push(userMsg);
+    saveMessages(messages);
+    renderMessages(messages);
+    input.value = "";
+
+    typing.style.display = "block";
+    sendBtn.disabled = true;
+    setStatus(false, "Connecting…");
+
+    const sessionId = getSessionId();
+    const langChoice = langSelect.value;
+    const langHint = langChoice === "auto" ? "" : langChoice;
+
+    try {
+      const res = await fetch("/api/method/ai_powered_css.api.chat.send_message", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || ""
+        },
+        body: JSON.stringify({ session_id: sessionId, message: text, lang_hint: langHint })
+      });
+      const data = await res.json();
+      const payload = data.message || data;
+      const safeAnswer = (payload.answer === undefined || payload.answer === null || payload.answer === "")
+        ? "Sorry, I couldn’t process that. Please try again."
+        : payload.answer;
+      const safeConfidence = (payload.confidence === undefined || payload.confidence === null)
+        ? 0
+        : payload.confidence;
+      const assistantMsg = {
+        role: "assistant",
+        content: safeAnswer,
+        confidence: safeConfidence,
+        sources: payload.sources || [],
+        language: payload.language || langHint || detectLanguage(text),
+        resolution_state: payload.resolution_state,
+        quick_replies: payload.quick_replies || [],
+        escalation_offered: payload.escalation_offered || false,
+        ticket_id: payload.ticket_id || null,
+        ticket_type: payload.ticket_type || null
+      };
+      messages.push(assistantMsg);
+      saveMessages(messages);
+      renderMessages(messages);
+      setStatus(true, "Connected");
+
+      if (payload.escalated && payload.ticket_id) {
+        const bannerText = payload.language === "hi"
+          ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`
+          : `Ticket created: #${payload.ticket_id}`;
+        banner.textContent = bannerText;
+        banner.style.display = "block";
+      }
+    } catch (err) {
+      setStatus(false, "Error");
+      const messages = loadMessages();
+      messages.push({ role: "assistant", content: "Sorry, something went wrong. Please try again.", confidence: 0, sources: [] });
+      saveMessages(messages);
+      renderMessages(messages);
+    } finally {
+      typing.style.display = "none";
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn.addEventListener("click", () => sendMessage());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  newChatBtn.addEventListener("click", () => {
+    if (!confirm("Clear chat and start a new session?")) return;
+    localStorage.removeItem(MESSAGE_KEY);
+    setNewSession();
+    banner.style.display = "none";
+    renderMessages([]);
+  });
+
+  toggleDetailsBtn.addEventListener("click", () => {
+    container.classList.toggle("show-details");
+    toggleDetailsBtn.textContent = container.classList.contains("show-details") ? "Hide details" : "Show details";
+  });
+
+  renderMessages(loadMessages());
+})();
+</script>
+{% endblock %}

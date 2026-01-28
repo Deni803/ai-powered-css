@@ -1,0 +1,11 @@
+{
+  "doc_id": "bms-calculating-the-heart-rating-bookmyshow-support-centre-c5a50fcffa",
+  "title": "Calculating the heart rating : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "en",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081424-calculating-the-heart-rating",
+  "fetched_at": "2026-01-28T04:20:12.460837+00:00",
+  "content_hash": "072f72eeeafb7eead32b7e39839f2ae73e4c05b79611c6cf52cfbabc463fc197",
+  "body": "How do you calculate the heart rating displayed on a film’s page?\nA film needs to have a minimum threshold of votes for the heart rating to be displayed. We also do not display the heart rating for a film before it has actually been screened/released.\nThe rating algorithm is a complex formula that calculates the weighted average of ratings from ticket buyers, non-transacting users and critic reviews. The formula is designed such that ratings from ticket buyers have the maximum influence on the overall heart rating of the film. The algorithm is also constantly updated to detect spam patterns and identify fake ratin\ngs."
+}

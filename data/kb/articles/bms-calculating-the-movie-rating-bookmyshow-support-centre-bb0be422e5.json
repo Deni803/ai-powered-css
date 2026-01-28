@@ -1,0 +1,11 @@
+{
+  "doc_id": "bms-calculating-the-movie-rating-bookmyshow-support-centre-bb0be422e5",
+  "title": "Calculating the movie rating : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "en",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081425-calculating-the-movie-rating",
+  "fetched_at": "2026-01-28T04:20:13.897239+00:00",
+  "content_hash": "bd6c709b5f5b1bb01fd2daa0124d3e6f8548f3bc88e45d4b53813d2dff3cfa12",
+  "body": "But I made my own calculations and the rating for movie should be 7.7, not 4.3! You’ve made a mistake.\nEach category – ticket buyers, non-transacting users and critic reviews - is given a weight-age, and the average rating is calculated on the basis of this. The algorithm is designed to reduce the possibility of users trying to beat the system by adding fake positive or negative reviews."
+}

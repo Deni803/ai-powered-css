@@ -1,0 +1,49 @@
+services:
+  mariadb:
+    image: mariadb:10.8
+    profiles: ["helpdesk-official"]
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-123}
+    volumes:
+      - helpdesk_official_mariadb:/var/lib/mysql
+
+  redis:
+    image: redis:alpine
+    profiles: ["helpdesk-official"]
+
+  frappe:
+    image: frappe/bench:latest
+    profiles: ["helpdesk-official"]
+    command: bash /workspace/infra/helpdesk/init.sh
+    environment:
+      - SHELL=/bin/bash
+      - PYENV_VERSION=3.10.13
+      - DB_PASSWORD
+      - HELP_DESK_ADMIN_PASSWORD
+      - RAG_URL
+      - RAG_API_KEY
+      - CONF_THRESHOLD
+      - MIN_TOP_SCORE
+      - ANSWER_TOP_SCORE
+      - VERY_LOW_THRESHOLD
+      - TOP_K
+      - ESCALATION_MAX_ATTEMPTS
+      - ESCALATION_FALLBACK
+      - PYTHONPATH=/home/frappe/frappe-bench/apps/ai_powered_css
+    working_dir: /home/frappe
+    volumes:
+      - ..:/workspace
+    ports:
+      - "8000:8000"
+      - "9000:9000"
+    depends_on:
+      - mariadb
+      - redis
+
+volumes:
+  helpdesk_official_mariadb:

@@ -1,0 +1,14 @@
+{
+  "doc_id": "bms-calculating-the-movie-rating-bookmyshow-support-centre-bb0be422e5",
+  "title": "Calculating the movie rating : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "hi",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081425-calculating-the-movie-rating",
+  "fetched_at": "2026-01-28T04:20:13.897239+00:00",
+  "content_hash": "bd6c709b5f5b1bb01fd2daa0124d3e6f8548f3bc88e45d4b53813d2dff3cfa12",
+  "body": "लेकिन मैंने अपनी खुद की गणनाएँ कीं और फिल्म की रेटिंग 7.7 होनी चाहिए, 4.3 नहीं! आपने एक गलती की है।  \nप्रत्येक श्रेणी - टिकट खरीदने वाले, गैर-लेन-देन करने वाले उपयोगकर्ता और समीक्षक समीक्षाएँ - को एक वजन दिया जाता है, और औसत रेटिंग इसी के आधार पर गणना की जाती है। एल्गोरिदम को इस तरह से डिज़ाइन किया गया है कि उपयोगकर्ताओं द्वारा नकली सकारात्मक या नकारात्मक समीक्षाएँ जोड़कर सिस्टम को धोखा देने की संभावना को कम किया जा सके।",
+  "translated_from": "bms-calculating-the-movie-rating-bookmyshow-support-centre-bb0be422e5",
+  "translation_model": "gpt-4o-mini",
+  "translation_at": "2026-01-28T05:05:56.437598+00:00"
+}

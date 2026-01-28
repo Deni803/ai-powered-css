@@ -1,0 +1,11 @@
+{
+  "doc_id": "bms-movie-in-the-now-showing-coming-soon-on-home-page-bookmyshow-support-centre-5406b39622",
+  "title": "Movie in the Now Showing/Coming Soon on Home Page : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "en",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081436-movie-in-the-now-showing-coming-soon-on-home-page",
+  "fetched_at": "2026-01-28T04:20:25.673413+00:00",
+  "content_hash": "6a7d0f36466b4c69ee7da1c16bcbc06b1c94250881fdb0acba65fb8f4812694f",
+  "body": "I want my movie to be first in the Now Showing/Coming Soon section on your home page. Can you do this?\nMovies in the Now Showing section are sorted basis: language of region, then date of release and further sorted according to alphabetical order. Movies in the Coming Soon section are displayed basis Fixed release date and Tentative release date. Movies having Fixed release dates are shown first and movies having Tentative release dates are shown later down the list. Further, movies having Fixed release date are sorted based on date, and if they have the same release date then they are sorted based on Language Sequence. This order cannot be altered manually."
+}

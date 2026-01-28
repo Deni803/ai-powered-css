@@ -1,0 +1,11 @@
+{
+  "doc_id": "bms-can-i-decide-to-not-pay-through-bms-cash-even-though-i-might-have-amount-available-bookmyshow-support-centre-4fb5bdfafd",
+  "title": "Can I decide to not pay through BMS Cash, even though I might have amount available? : BookMyShow Support Centre",
+  "category": "BMS Cash : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "en",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000141077-can-i-decide-to-not-pay-through-bms-cash-even-though-i-might-have-amount-available-",
+  "fetched_at": "2026-01-28T04:20:45.741341+00:00",
+  "content_hash": "d48088753a39d6bcc1c49b6cc968e4622127c30b0b7e6ec0a1e737408f22f572",
+  "body": "If user has BMS Cash balance, then it is up to the user to use it.\nThe user can deselect the BMS Cash, however, if BMS Cash is being used then the order value will first be taken from BMS Cash and the remaining order value, if any, shall be paid by other available online payment method."
+}
