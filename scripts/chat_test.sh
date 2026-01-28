@@ -279,20 +279,19 @@ if not resp.get("contact_required"):
     raise SystemExit("ERROR: expected contact_required for explicit request")
 PY
 
-# Provide contact to create ticket
-CREATE_TICKET_PAYLOAD=$(python3 - <<'PY'
+# Provide contact in chat to create ticket
+CONTACT_MESSAGE=$(python3 - <<'PY'
 import json, os
 print(json.dumps({
   "session_id": os.environ.get("SESSION_ID", ""),
-  "customer_name": "Test User",
-  "customer_email": "test@example.com",
-  "customer_phone": ""
+  "message": "my email is test@example.com",
+  "lang_hint": ""
 }))
 PY
 )
-request_ticket_json "$CREATE_TICKET_PAYLOAD"
+request_json "$API_URL" "$CONTACT_MESSAGE"
 if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
-  echo "ERROR: create_ticket failed"
+  echo "ERROR: contact submission failed"
   cat /tmp/chat_last_body.json
   exit 1
 fi
@@ -520,20 +519,19 @@ if not resp.get("contact_required"):
     raise SystemExit("ERROR: expected contact_required after repeated failures")
 PY
 
-# Create ticket with contact info
-CREATE_TICKET_PAYLOAD=$(python3 - <<'PY'
+# Create ticket with contact info via chat
+CONTACT_MESSAGE=$(python3 - <<'PY'
 import json, os
 print(json.dumps({
   "session_id": os.environ.get("SESSION_ID", ""),
-  "customer_name": "Test User",
-  "customer_email": "test@example.com",
-  "customer_phone": "9999999999"
+  "message": "my email is test@example.com and phone 9999999999",
+  "lang_hint": ""
 }))
 PY
 )
-request_ticket_json "$CREATE_TICKET_PAYLOAD"
+request_json "$API_URL" "$CONTACT_MESSAGE"
 if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
-  echo "ERROR: create_ticket failed after escalation"
+  echo "ERROR: contact submission failed after escalation"
   cat /tmp/chat_last_body.json
   exit 1
 fi

@@ -49,6 +49,10 @@ class EscalationPolicy:
             joined = "".join(tokens)
             if joined in _EN_GREETINGS or joined in _HI_GREETINGS:
                 return True
+        non_greeting = [tok for tok in tokens if tok not in _EN_GREETINGS and tok not in _HI_GREETINGS]
+        if len(tokens) > 2 and non_greeting:
+            # Avoid treating longer, meaningful queries that include a greeting word as pure greetings.
+            return False
         for tok in tokens:
             if tok in _EN_GREETINGS or tok in _HI_GREETINGS:
                 return True

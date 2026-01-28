@@ -175,34 +175,6 @@
 .quick-replies button {
   font-size: 12px;
 }
-.ticket-form {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px dashed #e2d6c4;
-  border-radius: 6px;
-  background: #fffaf4;
-  font-size: 12px;
-}
-.ticket-form label {
-  display: block;
-  margin: 6px 0 2px;
-  color: #5b5b5b;
-}
-.ticket-form input {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-.ticket-form .actions {
-  margin-top: 8px;
-  display: flex;
-  gap: 8px;
-}
-.ticket-form .error {
-  margin-top: 6px;
-  color: #d9534f;
-}
 </style>
 
 <script>
@@ -374,10 +346,18 @@
     lastServerTs = new Date(Math.max(...created)).toISOString();
   }
 
-  function renderMessages(messages) {
+  function isAtBottom() {
+    const threshold = 40;
+    return messageList.scrollTop + messageList.clientHeight >= messageList.scrollHeight - threshold;
+  }
+
+  function renderMessages(messages, options = {}) {
+    const stickToBottom = options.forceScroll ? true : isAtBottom();
     messageList.innerHTML = "";
     messages.slice(-20).forEach((msg, idx) => renderMessage(msg, idx, messages));
-    messageList.scrollTop = messageList.scrollHeight;
+    if (stickToBottom) {
+      messageList.scrollTop = messageList.scrollHeight;
+    }
     updateLastServerTs(messages);
   }
 
@@ -420,21 +400,15 @@
           <button class="btn btn-sm btn-secondary" data-action="continue">Continue Chat</button>
         `;
         actions.querySelector('[data-action="create"]').addEventListener("click", () => {
-          msg.show_contact_form = true;
-          saveMessages(messages);
-          renderMessages(messages);
+          sendMessage("create ticket");
         });
         actions.querySelector('[data-action="continue"]').addEventListener("click", () => {
           msg.escalation_offered = false;
           msg.contact_required = false;
-          msg.show_contact_form = false;
           saveMessages(messages);
-          renderMessages(messages);
+          renderMessages(messages, { forceScroll: true });
         });
         bubble.appendChild(actions);
-      }
-      if (msg.show_contact_form) {
-        bubble.appendChild(renderContactForm(msg, index, messages));
       }
       if (msg.quick_replies && msg.quick_replies.length) {
         const quick = document.createElement("div");
@@ -495,95 +469,6 @@
     });
   }
 
-  function validateContact(name, email, phone) {
-    const trimmedName = (name || "").trim();
-    const trimmedEmail = (email || "").trim().toLowerCase();
-    const rawPhone = (phone || "").trim();
-    const phoneDigits = rawPhone.replace(/\D/g, "");
-    if (trimmedEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmedEmail)) {
-      return { ok: false, error: "Please enter a valid email address." };
-    }
-    if (phoneDigits && phoneDigits.length < 10) {
-      return { ok: false, error: "Please enter a valid phone number." };
-    }
-    if (!trimmedEmail && !phoneDigits) {
-      return { ok: false, error: "Please provide at least an email or phone." };
-    }
-    return {
-      ok: true,
-      name: trimmedName,
-      email: trimmedEmail,
-      phone: phoneDigits
-    };
-  }
-
-  function renderContactForm(msg, index, messages) {
-    const sessionId = getSessionId();
-    const stored = getContactState(sessionId);
-    const form = document.createElement("div");
-    form.className = "ticket-form";
-    form.innerHTML = `
-      <div><strong>Contact details required to create a ticket</strong></div>
-      <label>Name (optional)</label>
-      <input type="text" data-field="name" placeholder="Your name" />
-      <label>Email (optional)</label>
-      <input type="email" data-field="email" placeholder="you@example.com" />
-      <label>Phone (optional)</label>
-      <input type="tel" data-field="phone" placeholder="10-digit phone" />
-      <div class="actions">
-        <button class="btn btn-sm btn-primary" data-action="submit">Submit Ticket</button>
-        <button class="btn btn-sm btn-secondary" data-action="cancel">Cancel</button>
-      </div>
-      <div class="error" style="display:none;"></div>
-    `;
-    const nameInput = form.querySelector('[data-field="name"]');
-    const emailInput = form.querySelector('[data-field="email"]');
-    const phoneInput = form.querySelector('[data-field="phone"]');
-    nameInput.value = stored.name || "";
-    emailInput.value = stored.email || "";
-    phoneInput.value = stored.phone || "";
-    const errorBox = form.querySelector(".error");
-
-    form.querySelector('[data-action="cancel"]').addEventListener("click", () => {
-      msg.show_contact_form = false;
-      saveMessages(messages);
-      renderMessages(messages);
-    });
-
-    form.querySelector('[data-action="submit"]').addEventListener("click", async () => {
-      const validation = validateContact(nameInput.value, emailInput.value, phoneInput.value);
-      if (!validation.ok) {
-        errorBox.textContent = validation.error;
-        errorBox.style.display = "block";
-        return;
-      }
-      errorBox.style.display = "none";
-      const payload = {
-        customer_name: validation.name,
-        customer_email: validation.email,
-        customer_phone: validation.phone
-      };
-      const contactState = {
-        name: payload.customer_name || stored.name || "",
-        email: payload.customer_email || stored.email || "",
-        phone: payload.customer_phone || stored.phone || ""
-      };
-      setContactState(sessionId, contactState);
-      await createTicket(index, payload);
-    });
-    return form;
-  }
-
-  function updateLastServerTs(messages) {
-    const latest = messages.reduce((acc, msg) => {
-      if (!msg.created_at || !msg.id) return acc;
-      const ts = new Date(msg.created_at).toISOString();
-      if (!acc || ts > acc) return ts;
-      return acc;
-    }, null);
-    if (latest) lastServerTs = latest;
-  }
-
   // Polling keeps the guest page simple while still providing near real-time updates.
   async function pollMessages() {
     const sessionId = getSessionId();
@@ -608,7 +493,7 @@
       }
       const messages = mergeMessages(loadMessages(), serverMessages);
       saveMessages(messages);
-      renderMessages(messages);
+      renderMessages(messages, { forceScroll: true });
       updateLastServerTs(messages);
       setStatus(true, "Connected");
     } catch (err) {
@@ -643,60 +528,6 @@
       ticket_type: msg.ticket_type || null,
       created_at: msg.created_at || new Date().toISOString()
     };
-  }
-
-  async function createTicket(messageIndex, contactPayload) {
-    const sessionId = getSessionId();
-    setStatus(false, "Creating ticket…");
-    try {
-      const res = await fetch("/api/method/ai_powered_css.api.chat.create_ticket", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || ""
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          ...(contactPayload || {})
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        const errorMessage = (data && data.exception) ? data.exception : "Unable to create ticket.";
-        throw new Error(errorMessage);
-      }
-      const payload = data.message || data;
-      if (!payload.ticket_id) {
-        throw new Error("ticket_id missing");
-      }
-      const messages = loadMessages();
-      if (messages[messageIndex]) {
-        messages[messageIndex].escalation_offered = false;
-        messages[messageIndex].contact_required = false;
-        messages[messageIndex].show_contact_form = false;
-        messages[messageIndex].ticket_id = payload.ticket_id;
-        messages[messageIndex].ticket_type = payload.ticket_type;
-      }
-      const lang = (messages[messageIndex] && messages[messageIndex].language) || langSelect.value;
-      const contactText = payload.customer_email || payload.customer_phone || "";
-      if (lang === "hi") {
-        banner.textContent = contactText
-          ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}। हम ${contactText} पर संपर्क करेंगे।`
-          : `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`;
-      } else {
-        banner.textContent = contactText
-          ? `Ticket #${payload.ticket_id} created. We’ll contact you at ${contactText} within 24 hours.`
-          : `Ticket created: #${payload.ticket_id}`;
-      }
-      banner.style.display = "block";
-      saveMessages(messages);
-      renderMessages(messages);
-      setStatus(true, "Connected");
-    } catch (err) {
-      setStatus(false, "Error");
-      banner.textContent = err && err.message ? err.message : "Unable to create ticket. Please try again.";
-      banner.style.display = "block";
-    }
   }
 
   function setNewSession() {
@@ -786,7 +617,7 @@
       };
       appendMessage(messages, assistantMsg);
       saveMessages(messages);
-      renderMessages(messages);
+      renderMessages(messages, { forceScroll: true });
       setStatus(true, "Connected");
 
       if (payload.escalated && payload.ticket_id) {
@@ -800,7 +631,7 @@
       setStatus(false, "Error");
       appendMessage(messages, { role: "assistant", content: "Sorry, something went wrong. Please try again.", confidence: 0, sources: [] });
       saveMessages(messages);
-      renderMessages(messages);
+      renderMessages(messages, { forceScroll: true });
     } finally {
       typing.style.display = "none";
       sendBtn.disabled = false;
@@ -815,12 +646,12 @@
     const messages = loadMessages();
     appendMessage(messages, { role: "user", content: text });
     saveMessages(messages);
-    renderMessages(messages);
+    renderMessages(messages, { forceScroll: true });
     input.value = "";
 
     if (handleOnboardingInput(text, messages)) {
       saveMessages(messages);
-      renderMessages(messages);
+      renderMessages(messages, { forceScroll: true });
       return;
     }
     await sendToServer(text, messages);
@@ -839,7 +670,7 @@
     localStorage.removeItem(MESSAGE_KEY);
     const newId = setNewSession();
     clearOnboardingState(newId);
-    setContactState(newId, { name: "", email: "", phone: "" });
+    setContactState(newId, { name: "" });
     banner.style.display = "none";
     renderMessages([]);
     startOnboardingIfNeeded();
@@ -859,7 +690,7 @@
     appendMessage(messages, { role: "assistant", content: onboardingPrompt("ASK_NAME") });
     setOnboardingState(sessionId, { ...state, stage: "ASK_NAME" });
     saveMessages(messages);
-    renderMessages(messages);
+    renderMessages(messages, { forceScroll: true });
   }
 
   renderMessages(loadMessages());

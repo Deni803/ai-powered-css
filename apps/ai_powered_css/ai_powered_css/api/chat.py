@@ -131,6 +131,23 @@ _BOOKING_WORDS = {
     "show",
 }
 
+_DOMAIN_WORDS = set().union(
+    _REFUND_WORDS,
+    _PAYMENT_WORDS,
+    _BOOKING_WORDS,
+    _ENGLISH_HINT_WORDS,
+    {
+        "transaction",
+        "deducted",
+        "blocked",
+        "block",
+        "seat",
+        "seats",
+        "order",
+        "orders",
+    },
+)
+
 _ISSUE_PATTERNS = [
     {"amount", "deducted"},
     {"amount", "confirmation"},
@@ -275,6 +292,19 @@ def _explicit_support_request(text: str) -> bool:
     return _has_any(text, _SUPPORT_REQUEST_WORDS)
 
 
+def _is_off_topic(text: str) -> bool:
+    """Detect queries outside the support domain to avoid random KB answers."""
+    if _detect_intent(text):
+        return False
+    if _matches_issue_pattern(text):
+        return False
+    if _explicit_support_request(text):
+        return False
+    if _has_any(text, _DOMAIN_WORDS):
+        return False
+    return True
+
+
 def _matches_issue_pattern(text: str) -> bool:
     tokens = set(_tokenize(text))
     if not tokens:
@@ -385,6 +415,17 @@ def _is_followup_query(text: str) -> bool:
         "where",
         "track",
         "update",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "late",
+        "delayed",
+        "delay",
+        "pending",
+        "since",
         "kab",
         "kabtak",
         "kabtak",
@@ -401,7 +442,11 @@ def _is_followup_query(text: str) -> bool:
         "कैसे",
         "कितना",
     }
-    return any(tok in followup for tok in tokens) or len(tokens) <= 3
+    if any(tok in followup for tok in tokens):
+        return True
+    if any(tok.isdigit() for tok in tokens):
+        return True
+    return len(tokens) <= 3
 
 
 def _expand_query_with_subtype(subtype: str, message: str, lang: str) -> str:
@@ -489,6 +534,19 @@ def _normalize_contact(
         frappe.throw(_("Invalid phone number."))
     if not email and not phone:
         frappe.throw(_("Email or phone is required to create a ticket."))
+    return name, email, phone
+
+
+def _extract_contact_from_text(text: str) -> tuple[str | None, str | None, str | None]:
+    """Best-effort contact extraction from user messages for chat-based ticket creation."""
+    email_match = re.search(r"[^@\s]+@[^@\s]+\.[^@\s]+", text)
+    email = email_match.group(0) if email_match else None
+    phone_digits = re.sub(r"\D", "", text)
+    phone = phone_digits if len(phone_digits) >= 10 else None
+    name = None
+    name_match = re.search(r"(?:my name is|i am|i'm)\s+([A-Za-z]{2,20})", text, re.IGNORECASE)
+    if name_match:
+        name = name_match.group(1)
     return name, email, phone
 
 
@@ -1119,6 +1177,94 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             extra={"language": language},
         )
 
+        # If we previously asked for contact details, try to create the ticket from chat input.
+        last_state = getattr(session_doc, "last_resolution_state", None)
+        if last_state == RESOLUTION_UNRESOLVED:
+            name, email, phone = _extract_contact_from_text(message)
+            if email or phone:
+                name, email, phone = _normalize_contact(name, email, phone)
+                last_entry = _last_assistant_entry(session_name)
+                sources = last_entry.get("sources") or []
+                confidence = last_entry.get("confidence")
+                top_score = _top_score_from_sources(sources)
+                metadata = {
+                    "session_id": session_id,
+                    "language": language,
+                    "resolution_state": RESOLUTION_UNRESOLVED,
+                    "confidence": confidence,
+                    "top_score": top_score,
+                    "customer_name": name,
+                    "customer_email": email,
+                    "customer_phone": phone,
+                }
+                history = _fetch_history(session_name, limit=20)
+                ticket_type, ticket_id = _create_ticket_for_session(history, message, sources, metadata=metadata)
+                answer = _ticket_created_reply(language, ticket_id)
+                assistant_doc = _insert_message(session_name, "assistant", answer, confidence=0.0, sources=sources)
+                _update_session_state(
+                    session_doc,
+                    low_conf_count=0,
+                    clarification_count=0,
+                    last_resolution_state=RESOLUTION_UNRESOLVED,
+                    last_escalation_offered=False,
+                    preferred_lang=language,
+                )
+                _publish_chat_message(
+                    session_id,
+                    assistant_doc,
+                    sources=sources,
+                    extra={
+                        "language": language,
+                        "resolution_state": RESOLUTION_UNRESOLVED,
+                        "escalation_offered": False,
+                        "contact_required": False,
+                        "ticket_id": ticket_id,
+                        "ticket_type": ticket_type,
+                    },
+                )
+                return {
+                    "session_id": session_id,
+                    "answer": answer,
+                    "confidence": 0.0,
+                    "language": language,
+                    "sources": sources,
+                    "resolution_state": RESOLUTION_UNRESOLVED,
+                    "quick_replies": [],
+                    "escalated": True,
+                    "escalation_offered": False,
+                    "contact_required": False,
+                    "ticket_id": ticket_id,
+                    "ticket_type": ticket_type,
+                }
+            # No contact detected: prompt again and skip RAG.
+            answer = _contact_request_prompt(language)
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=0.0, sources=[])
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": language,
+                    "resolution_state": RESOLUTION_UNRESOLVED,
+                    "escalation_offered": True,
+                    "contact_required": True,
+                },
+            )
+            return {
+                "session_id": session_id,
+                "answer": answer,
+                "confidence": 0.0,
+                "language": language,
+                "sources": [],
+                "resolution_state": RESOLUTION_UNRESOLVED,
+                "quick_replies": [],
+                "escalated": False,
+                "escalation_offered": True,
+                "contact_required": True,
+                "ticket_id": None,
+                "ticket_type": None,
+            }
+
         language_choice = _is_language_choice(message)
         if language_choice:
             # Explicit language toggle by user.
@@ -1460,8 +1606,15 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         elif sources:
             confidence = max(confidence, top_score)
 
+        if _is_off_topic(message) and not issue_subtype and not issue_category:
+            # Off-topic queries should not be answered with unrelated KB sources.
+            sources = []
+            top_score = 0.0
+
+        # Allow strong KB evidence to answer even if model self-confidence is slightly below threshold.
         answer_ready = bool(sources) and top_score >= policy_settings["answer_top_score"]
-        answer_ready = answer_ready and confidence >= policy_settings["conf_threshold"]
+        if answer_ready and confidence < policy_settings["conf_threshold"]:
+            confidence = max(confidence, top_score)
         if not answer_ready and issue_subtype and sources and top_score >= policy_settings["answer_top_score"]:
             answer_ready = True
 
