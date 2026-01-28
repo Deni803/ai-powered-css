@@ -513,8 +513,8 @@ def _offer_ticket_prompt(lang: str) -> str:
 
 def _contact_request_prompt(lang: str) -> str:
     if lang == "hi":
-        return "टिकट बनाने के लिए कृपया अपना ईमेल या फोन नंबर साझा करें।"
-    return "To create a support ticket, please share your email or phone number."
+        return "टिकट बनाने के लिए कृपया अपना ईमेल या फोन नंबर साझा करें (इनमें से कोई एक)."
+    return "To create a support ticket, please share your email or phone number (either one is enough)."
 
 
 def _normalize_contact(
@@ -839,10 +839,10 @@ def _evaluate_sources(sources: list[dict], min_top_score: float) -> tuple[list[d
 def _ticket_created_reply(lang: str, ticket_id: str | None) -> str:
     if lang == "hi":
         if ticket_id:
-            return f"🎫 आपका टिकट बन गया है: #{ticket_id}"
+            return f"🎫 आपका टिकट बन गया है: #{ticket_id}. हमारी टीम 24 घंटे के भीतर आपसे संपर्क करेगी।"
         return "टिकट बनाने में समस्या हुई। कृपया थोड़ी देर बाद फिर से प्रयास करें।"
     if ticket_id:
-        return f"Ticket created: #{ticket_id}"
+        return f"Ticket created. Your ticket ID is #{ticket_id}. Our agent will contact you within 24 hours."
     return "Unable to create a ticket right now. Please try again later."
 
 
@@ -886,7 +886,7 @@ def _handle_unresolved(
         low_conf_count=0,
         clarification_count=0,
         last_resolution_state=RESOLUTION_UNRESOLVED,
-        last_escalation_offered=True,
+        last_escalation_offered=False,
         preferred_lang=language,
     )
     _publish_chat_message(
@@ -896,7 +896,7 @@ def _handle_unresolved(
         extra={
             "language": language,
             "resolution_state": RESOLUTION_UNRESOLVED,
-            "escalation_offered": True,
+            "escalation_offered": False,
             "contact_required": True,
             "ticket_id": ticket_id,
             "ticket_type": ticket_type,
@@ -911,7 +911,7 @@ def _handle_unresolved(
         "resolution_state": RESOLUTION_UNRESOLVED,
         "quick_replies": [],
         "escalated": escalated,
-        "escalation_offered": True,
+        "escalation_offered": False,
         "contact_required": True,
         "ticket_id": ticket_id,
         "ticket_type": ticket_type,
@@ -1246,7 +1246,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 extra={
                     "language": language,
                     "resolution_state": RESOLUTION_UNRESOLVED,
-                    "escalation_offered": True,
+                    "escalation_offered": False,
                     "contact_required": True,
                 },
             )

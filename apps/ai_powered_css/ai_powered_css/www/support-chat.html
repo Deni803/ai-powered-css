@@ -391,7 +391,7 @@
         details.appendChild(src);
       }
       bubble.appendChild(details);
-      const showEscalation = (msg.escalation_offered || msg.contact_required) && !(msg.quick_replies && msg.quick_replies.length);
+      const showEscalation = msg.escalation_offered && !(msg.quick_replies && msg.quick_replies.length);
       if (showEscalation) {
         const actions = document.createElement("div");
         actions.className = "sources";
@@ -622,8 +622,8 @@
 
       if (payload.escalated && payload.ticket_id) {
         const bannerText = payload.language === "hi"
-          ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`
-          : `Ticket created: #${payload.ticket_id}`;
+          ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}. हमारी टीम 24 घंटे के भीतर संपर्क करेगी।`
+          : `Ticket created. Your ticket ID is #${payload.ticket_id}. Our agent will contact you within 24 hours.`;
         banner.textContent = bannerText;
         banner.style.display = "block";
       }

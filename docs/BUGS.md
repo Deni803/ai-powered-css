@@ -31,6 +31,13 @@
 
 ### Module 4.6
 - Helpdesk install failed on Postgres with `smallint = boolean` SLA query error; patched Helpdesk SLA filters to compare integer flags on Postgres.
+
+### Module 4.7+
+- Contact form input was clearing/resetting; moved contact capture into chat flow.
+- Auto-scroll forced the view to bottom while reading older messages; now only auto-scrolls if near bottom.
+- Follow-up queries (e.g., “15 days”) lost context; follow-up detection now uses issue subtype + KB retrieval.
+- Contact prompt repeated “Create Ticket” and re-sent the same prompt; CTA hidden while contact is required.
+- Ticket confirmation copy was too short; replaced with clear “ticket ID + 24-hour contact” message.
 - HD Ticket creation failed (404/DoesNotExistError) due to missing Helpdesk defaults (ticket statuses, template, settings). Fixed by seeding minimal defaults (Default template with `template_name`, Open/Replied/Resolved/Closed statuses, priority/type, and required HD Settings fields).
 - HD Ticket creation failed during SLA application on Postgres because `ignore_permissions` was passed to `get_last_doc` (unsupported in this version). Patched `apply_sla` to safely no-op when SLA is absent and avoid the unsupported argument.
 
