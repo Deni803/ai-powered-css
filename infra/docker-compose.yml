@@ -34,44 +34,33 @@ services:
       retries: 5
     restart: unless-stopped
 
-  helpdesk-configurator:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    entrypoint: ["bash", "-c"]
-    command: >
-      ls -1 apps > sites/apps.txt;
-      bench set-config -g db_type $$DB_TYPE;
-      bench set-config -g db_host $$DB_HOST;
-      bench set-config -gp db_port $$DB_PORT;
-      bench set-config -g redis_cache "redis://$$REDIS_CACHE";
-      bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
-      bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
-      bench set-config -gp socketio_port $$SOCKETIO_PORT;
+  postgres:
+    image: postgres:16-alpine
     environment:
-      DB_TYPE: ${DB_TYPE:-mariadb}
-      DB_HOST: helpdesk-db
-      DB_PORT: "3306"
-      REDIS_CACHE: helpdesk-redis-cache:6379
-      REDIS_QUEUE: helpdesk-redis-queue:6379
-      SOCKETIO_PORT: 9000
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-123}
+      POSTGRES_USER: ${DB_ROOT_USERNAME:-postgres}
+      POSTGRES_DB: ${DB_NAME:-helpdesk}
     volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-db:
-        condition: service_healthy
-      helpdesk-redis-cache:
-        condition: service_started
-      helpdesk-redis-queue:
-        condition: service_started
-    restart: on-failure
+      - helpdesk_postgres:/var/lib/postgresql/data
+    restart: unless-stopped
 
-  helpdesk-backend:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
+  redis:
+    image: redis:alpine
+    restart: unless-stopped
+
+  frappe:
+    image: frappe/bench:latest
+    command: bash /workspace/infra/helpdesk/init.sh
     environment:
+      - SHELL=/bin/bash
+      - PYENV_VERSION=3.10.13
+      - DB_PASSWORD
+      - DB_ROOT_USERNAME
+      - DB_NAME
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_TYPE=postgres
+      - HELP_DESK_ADMIN_PASSWORD
       - RAG_URL
       - RAG_API_KEY
       - CONF_THRESHOLD
@@ -82,137 +71,17 @@ services:
       - ESCALATION_MAX_ATTEMPTS
       - ESCALATION_FALLBACK
       - PYTHONPATH=/home/frappe/frappe-bench/apps/ai_powered_css
+    working_dir: /home/frappe
     volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
       - ..:/workspace
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-configurator:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  helpdesk-frontend:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    command: ["nginx-entrypoint.sh"]
-    environment:
-      BACKEND: helpdesk-backend:8000
-      SOCKETIO: helpdesk-websocket:9000
-      FRAPPE_SITE_NAME_HEADER: ${FRAPPE_SITE_NAME_HEADER:-$$host}
-      UPSTREAM_REAL_IP_ADDRESS: ${UPSTREAM_REAL_IP_ADDRESS:-127.0.0.1}
-      UPSTREAM_REAL_IP_HEADER: ${UPSTREAM_REAL_IP_HEADER:-X-Forwarded-For}
-      UPSTREAM_REAL_IP_RECURSIVE: ${UPSTREAM_REAL_IP_RECURSIVE:-off}
-      PROXY_READ_TIMEOUT: ${PROXY_READ_TIMEOUT:-120}
-      CLIENT_MAX_BODY_SIZE: ${CLIENT_MAX_BODY_SIZE:-50m}
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
     ports:
-      - "8080:8080"
-    volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
+      - "8000:8000"
+      - "9000:9000"
     depends_on:
-      - helpdesk-backend
-      - helpdesk-websocket
-    restart: unless-stopped
-
-  helpdesk-websocket:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
-    environment:
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
-    volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-configurator:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  helpdesk-queue-short:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    command: bench worker --queue short,default
-    environment:
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
-    volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-configurator:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  helpdesk-queue-long:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    command: bench worker --queue long,default,short
-    environment:
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
-    volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-configurator:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  helpdesk-scheduler:
-    image: frappe/erpnext
-    profiles: ["helpdesk-legacy"]
-    command: bench schedule
-    environment:
-      PYTHONPATH: /home/frappe/frappe-bench/apps/ai_powered_css
-    volumes:
-      - helpdesk_sites:/home/frappe/frappe-bench/sites
-      - helpdesk_logs:/home/frappe/frappe-bench/logs
-      - ../apps/ai_powered_css:/home/frappe/frappe-bench/apps/ai_powered_css
-    depends_on:
-      helpdesk-configurator:
-        condition: service_completed_successfully
-    restart: unless-stopped
-
-  helpdesk-db:
-    image: mariadb:11.8
-    profiles: ["helpdesk-legacy"]
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_unicode_ci
-      - --skip-character-set-client-handshake
-      - --skip-innodb-read-only-compressed
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-123}
-      MARIADB_AUTO_UPGRADE: 1
-    volumes:
-      - helpdesk_db:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      start_period: 5s
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  helpdesk-redis-cache:
-    image: redis:6.2-alpine
-    profiles: ["helpdesk-legacy"]
-    restart: unless-stopped
-
-  helpdesk-redis-queue:
-    image: redis:6.2-alpine
-    profiles: ["helpdesk-legacy"]
-    volumes:
-      - helpdesk_redis_queue:/data
+      - postgres
+      - redis
     restart: unless-stopped
 
 volumes:
   qdrant_data:
-  helpdesk_sites:
-  helpdesk_logs:
-  helpdesk_db:
-  helpdesk_redis_queue:
+  helpdesk_postgres:

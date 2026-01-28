@@ -23,7 +23,7 @@ Customer Browser
 - Frappe Framework + Helpdesk app (CRM/ticketing)
 - LLM: OpenAI (chat + embeddings)
 - Vector DB: Qdrant
-- DB: MariaDB (Module 1 dev stability); Postgres alignment planned
+- DB: PostgreSQL (PRD default)
 
 ## Repo layout
 - `apps/`    - Frappe apps and custom UI
@@ -42,46 +42,54 @@ Customer Browser
 make verify
 ```
 
-## Full verification (official Helpdesk stack)
+## Full verification (end-to-end)
 ```bash
-make up-helpdesk-official
 make verify-full
 ```
 
 ## Setup (manual)
 1. Copy env file: `cp infra/env.example infra/.env` and fill values.
 2. Start local stack: `make up`.
-3. (Legacy stack) Initialize Helpdesk site once: `make helpdesk-init`.
-4. (Legacy stack) Install app: `make helpdesk-install-app`.
-5. Run checks: `make smoke`.
-6. Fetch KB sources: `make fetch-kb`.
-7. (Optional) Translate KB to Hindi: `make translate-hi` (set `KB_TRANSLATE_HI=true`).
-8. Ingest KB (one-time or when KB changes): `make init-kb` (requires OpenAI key).
+3. Run checks: `make smoke`.
+4. Fetch KB sources: `make fetch-kb`.
+5. (Optional) Translate KB to Hindi: `make translate-hi` (set `KB_TRANSLATE_HI=true`).
+6. Ingest KB (one-time or when KB changes): `make init-kb` (requires OpenAI key).
 
 ## Usage
-- Legacy Helpdesk UI: http://localhost:8080
-- Official Helpdesk UI: http://localhost:8000/helpdesk (or http://helpdesk.localhost:8000/helpdesk with a hosts entry)
-- Chat entry page: http://localhost:8080/support (legacy) or http://localhost:8000/support (official)
-- Chat page: http://localhost:8080/support-chat (legacy) or http://localhost:8000/support-chat (official)
-- Tickets: HD Ticket (official stack) or fallback to ToDo when enabled
+- Helpdesk UI: http://localhost:8000/helpdesk (or http://helpdesk.localhost:8000/helpdesk with a hosts entry)
+- Chat entry page: http://localhost:8000/support
+- Chat page: http://localhost:8000/support-chat
+- Tickets: HD Ticket (Helpdesk)
 - Guest ticket status: `/api/method/ai_powered_css.api.chat.get_ticket_status?ticket_id=...`
 - Qdrant: http://localhost:6333
 - RAG service: http://localhost:8001/health
+
+## Deployed URLs (BookYourShow)
+- Chat: https://bookyourshow.duckdns.org/support-chat
+- Helpdesk tickets: https://bookyourshow.duckdns.org/helpdesk/tickets
+- Qdrant (reference): http://13.234.72.132:6333/dashboard#/collections
+
+## Docs index
+- `ARCHITECTURE.md` - system overview + data flow.
+- `API.md` - RAG + chat endpoints with examples.
+- `BUGS.md` - known issues and resolved bugs.
+- `DECISIONS.md` - ADR-style records and rationale.
+- `DEMO.md` - demo flow notes.
+- `FEATURES.md` - feature checklist by module.
+- `MODULE_LOG.md` - module-by-module change log.
+- `TESTING.md` - test scenarios and example queries.
 
 ## Ports
 | Service | Port | Notes |
 | --- | --- | --- |
 | Qdrant | 6333 | Vector DB API |
 | RAG | 8001 | FastAPI stub |
-| Helpdesk | 8080 | Frappe frontend |
+| Helpdesk | 8000 | Frappe frontend |
 
 ## Commands
-- `make verify` - fast boot + smoke (legacy stack)
-- `make verify-full` - official stack + rag/chat tests + smoke
-- `make up` - start legacy stack
-- `make up-helpdesk-official` - start official Helpdesk stack
-- `make helpdesk-init` - create legacy Frappe site (idempotent)
-- `make helpdesk-install-app` - install AI Powered CSS app into legacy site
+- `make verify` - fast boot + smoke
+- `make verify-full` - end-to-end checks (rag/chat tests + smoke)
+- `make up` - start stack
 - `make smoke` - smoke test endpoints
 - `make fetch-kb` - fetch & parse BookMyShow support pages
 - `make translate-hi` - translate EN KB to Hindi (requires OpenAI key)
@@ -93,18 +101,21 @@ make verify-full
 - `make down` - stop and remove containers/volumes
 
 ## Testing
-- Smoke: `make smoke` (expects Helpdesk site initialized once).
+- Smoke: `make smoke`.
 - Sample queries: see `docs/TESTING.md`.
 
 ## Known limitations
-- Official Helpdesk stack uses `frappe/bench` with init.sh (aligned to upstream).
-- Legacy Helpdesk app install can fail in the current image (missing node/yarn/telephony).
-- MariaDB used in Module 1; Postgres alignment planned.
+- Helpdesk install on Postgres includes a minimal patch for SLA boolean filtering.
 - KB fetch depends on publicly available HTML; some pages are JS-rendered.
 
 ## Required env vars (for KB + RAG)
 - `OPENAI_API_KEY` (embeddings + translation)
 - `RAG_API_KEY` (RAG auth)
+
+## Required env vars (Postgres)
+- `DB_PASSWORD`
+- `DB_ROOT_USERNAME` (default: postgres)
+- `DB_NAME` (default: helpdesk)
 
 ## Optional env vars (KB fetch/translate)
 - `KB_TRANSLATE_HI=true` to generate Hindi translations (requires OpenAI key)

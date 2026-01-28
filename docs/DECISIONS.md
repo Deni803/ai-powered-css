@@ -14,7 +14,7 @@
 | Decision | Choice | Rationale |
 | --- | --- | --- |
 | Compose baseline | frappe_docker-style dev stack | Matches known-good multi-container Frappe patterns. |
-| Database (dev) | MariaDB | Stable for Frappe dev; PRD mismatch noted, Postgres profile planned. |
+| Database (dev) | Postgres (Module 4.6) | Now aligns with PRD; MariaDB support removed. |
 | Env file | `infra/.env` | Single source for compose env vars; template in `infra/env.example`. |
 | Verify workflow | `make verify` | One-command validation for reviewers (boot + init + smoke). |
 
@@ -98,7 +98,22 @@
 | External channel suppression | Prompt + sanitizer block live chat/email/WhatsApp unless in KB | Avoids hallucinated support channels. |
 | Ticket readability | Add Key Details section + bounded transcript | Faster scanning for Helpdesk agents. |
 
+## Module 4.6 decisions (2026-01-28)
+
+| Decision | Choice | Rationale |
+| --- | --- | --- |
+| Postgres-only stack | Remove MariaDB support; Postgres is the only DB | Aligns strictly with PRD and avoids multi-DB complexity. |
+| Real-time updates | Polling-based updates (2–4s) | Simplifies guest website chat, avoids socket infra, acceptable latency for POC. |
+| Helpdesk SLA fix | Patch Helpdesk SLA boolean filters to integer flags on Postgres | Avoids smallint vs boolean operator error with minimal change. |
+
+## Module 4.7 decisions (2026-01-29)
+
+| Decision | Choice | Rationale |
+| --- | --- | --- |
+| Realtime transport | Polling only (no WebSocket) | Fewer moving parts for guest chat; easier debugging; latency acceptable for POC. Switch to WebSocket when multi-agent/instant updates or higher concurrency is required. |
+| Onboarding state | Client-side localStorage | Avoids new DocTypes/migrations; onboarding is UX-only and per-session. |
+| Ticket contact capture | Require email/phone before ticket creation | Improves support follow-up quality and keeps ticket data actionable. |
+
 ## Next decisions to capture
-- Postgres override/profile for PRD alignment.
 - Observability and logging stack.
 - Auth/session strategy for chat.

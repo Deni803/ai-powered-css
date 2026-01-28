@@ -31,8 +31,9 @@ if path.exists():
     except Exception:
         data = {}
 
-data.setdefault("db_host", "helpdesk-db")
-data.setdefault("db_port", 3306)
+data.setdefault("db_type", "postgres")
+data.setdefault("db_host", "postgres")
+data.setdefault("db_port", 5432)
 data.setdefault("redis_cache", "redis://helpdesk-redis-cache:6379")
 data.setdefault("redis_queue", "redis://helpdesk-redis-queue:6379")
 data.setdefault("redis_socketio", "redis://helpdesk-redis-queue:6379")

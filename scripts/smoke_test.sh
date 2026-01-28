@@ -30,11 +30,6 @@ retry_http() {
     sleep "$SMOKE_SLEEP"
   done
 
-  if [ "$name" = "Helpdesk frontend" ] && [ "$code" = "404" ]; then
-    echo "FAIL: Helpdesk returned 404. Run 'make helpdesk-init' to create the site."
-    return 1
-  fi
-
   echo "FAIL: ${name} did not respond with expected code(s) (${allowed_codes}). Last HTTP ${code}."
   return 1
 }
@@ -44,8 +39,8 @@ require_bin curl
 QDRANT_HEALTH_URL="${QDRANT_HEALTH_URL:-http://localhost:6333/healthz}"
 QDRANT_ROOT_URL="${QDRANT_ROOT_URL:-http://localhost:6333/}"
 RAG_HEALTH_URL="${RAG_HEALTH_URL:-http://localhost:8001/health}"
-HELPDESK_URL="${HELPDESK_URL:-http://localhost:8080/}"
-CHAT_URL="${CHAT_URL:-http://localhost:8080/support-chat}"
+HELPDESK_URL="${HELPDESK_URL:-http://localhost:8000/}"
+CHAT_URL="${CHAT_URL:-http://localhost:8000/support-chat}"
 
 if ! retry_http "Qdrant (healthz)" "$QDRANT_HEALTH_URL" "200"; then
   echo "Qdrant health endpoint failed, trying root..."

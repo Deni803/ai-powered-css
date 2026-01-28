@@ -358,5 +358,6 @@ print_query_summary "QDRANT_DOWN_QUERY"
 assert_safe_response
 ${COMPOSE} start qdrant || true
 wait_for_url "http://localhost:6333/healthz" || true
+wait_for_url "${RAG_URL}/health" || true
 
 echo "RAG integration tests passed."

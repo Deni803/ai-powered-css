@@ -1,9 +1,8 @@
-.PHONY: up down logs lint format smoke init-kb fetch-kb translate-hi helpdesk-init helpdesk-install-app verify verify-full ensure-env rag-test chat-test up-helpdesk-official print-creds
+.PHONY: up down logs lint format smoke init-kb fetch-kb translate-hi verify verify-full ensure-env rag-test chat-test print-creds
 
 ENV_FILE := infra/.env
 ENV_EXAMPLE := infra/env.example
-COMPOSE_LEGACY := docker compose --env-file $(ENV_FILE) -f infra/docker-compose.yml --profile helpdesk-legacy
-COMPOSE_OFFICIAL := docker compose --env-file $(ENV_FILE) -f infra/docker-compose.yml -f infra/docker-compose.helpdesk.yml --profile helpdesk-official
+COMPOSE := docker compose --env-file $(ENV_FILE) -f infra/docker-compose.yml
 
 ensure-env:
 	@if [ ! -f $(ENV_FILE) ]; then \
@@ -12,16 +11,13 @@ ensure-env:
 	fi
 
 up: ensure-env
-	$(COMPOSE_LEGACY) up -d --build
-
-up-helpdesk-official: ensure-env
-	$(COMPOSE_OFFICIAL) up -d --build
+	$(COMPOSE) up -d --build
 
 down:
-	docker compose --env-file $(ENV_FILE) -f infra/docker-compose.yml -f infra/docker-compose.helpdesk.yml down -v
+	$(COMPOSE) down
 
 logs:
-	$(COMPOSE_LEGACY) logs -f --tail=200
+	$(COMPOSE) logs -f --tail=200
 
 lint:
 	@echo "Running lint checks (TODO: add linters)"
@@ -41,23 +37,12 @@ fetch-kb:
 translate-hi:
 	@python3 scripts/translate_kb_hi.py
 
-helpdesk-init: ensure-env
-	@if [ "$$HELPDESK_PROFILE" = "official" ]; then \
-		echo "Skipping legacy helpdesk-init (official profile)."; \
-	else \
-		$(COMPOSE_LEGACY) run --rm helpdesk-backend bash -lc "bash /workspace/scripts/helpdesk_init.sh"; \
-	fi
-
-helpdesk-install-app: ensure-env
-	$(COMPOSE_LEGACY) run --rm helpdesk-backend bash -lc "bash /workspace/scripts/helpdesk_install_ai_powered_css.sh"
-
 verify:
 	$(MAKE) up
 	$(MAKE) smoke
 
 verify-full:
-	$(MAKE) up-helpdesk-official
-	HELPDESK_PROFILE=official $(MAKE) helpdesk-init
+	$(MAKE) up
 	$(MAKE) rag-test
 	CHAT_REQUIRE_HD_TICKET=1 CHAT_BASE_URL=http://localhost:8000 CHAT_WAIT_ATTEMPTS=60 $(MAKE) chat-test
 	HELPDESK_URL=http://localhost:8000/ CHAT_URL=http://localhost:8000/support-chat SMOKE_RETRIES=60 $(MAKE) smoke

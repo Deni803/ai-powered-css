@@ -1,0 +1,14 @@
+{
+  "doc_id": "bms-movie-in-the-now-showing-coming-soon-on-home-page-bookmyshow-support-centre-5406b39622",
+  "title": "Movie in the Now Showing/Coming Soon on Home Page : BookMyShow Support Centre",
+  "category": "Ratings & Reviews : BookMyShow Support Centre",
+  "tags": [],
+  "lang": "hi",
+  "source_url": "https://support.bookmyshow.com/support/solutions/articles/4000081436-movie-in-the-now-showing-coming-soon-on-home-page",
+  "fetched_at": "2026-01-28T04:20:25.673413+00:00",
+  "content_hash": "6a7d0f36466b4c69ee7da1c16bcbc06b1c94250881fdb0acba65fb8f4812694f",
+  "body": "मैं चाहता हूँ कि मेरी फिल्म आपके होम पेज पर \"अब दिखा रहे हैं/जल्द आ रहा है\" सेक्शन में पहले स्थान पर हो। क्या आप यह कर सकते हैं?\n\"अब दिखा रहे हैं\" सेक्शन में फिल्में क्षेत्र की भाषा के आधार पर, फिर रिलीज की तारीख के अनुसार और आगे वर्णानुक्रम के अनुसार क्रमबद्ध की जाती हैं। \"जल्द आ रहा है\" सेक्शन में फिल्में निश्चित रिलीज तारीख और अस्थायी रिलीज तारीख के आधार पर प्रदर्शित की जाती हैं। जिन फिल्मों की निश्चित रिलीज तारीख होती है, उन्हें पहले दिखाया जाता है और जिन फिल्मों की अस्थायी रिलीज तारीख होती है, उन्हें सूची में बाद में दिखाया जाता है। इसके अलावा, जिन फिल्मों की निश्चित रिलीज तारीख होती है, उन्हें तारीख के आधार पर क्रमबद्ध किया जाता है, और यदि उनकी रिलीज तारीख समान होती है, तो उन्हें भाषा अनुक्रम के आधार पर क्रमबद्ध किया जाता है। इस क्रम को मैन्युअल रूप से बदला नहीं जा सकता।",
+  "translated_from": "bms-movie-in-the-now-showing-coming-soon-on-home-page-bookmyshow-support-centre-5406b39622",
+  "translation_model": "gpt-4o-mini",
+  "translation_at": "2026-01-28T15:50:31.352661+00:00"
+}

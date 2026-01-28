@@ -5,7 +5,7 @@
   <div class="ai-css-chat__header">
     <div>
       <h2 class="ai-css-chat__title">Support Chat</h2>
-      <div class="ai-css-chat__subtitle">BookMyShow Assistant (EN/HI)</div>
+      <div class="ai-css-chat__subtitle">BookYourShow Assistant (EN/HI)</div>
     </div>
     <div class="ai-css-chat__controls">
       <div class="ai-css-chat__status" id="status-indicator">
@@ -86,9 +86,33 @@
   overflow-y: auto;
   padding: 16px 0;
 }
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.message-row.user {
+  justify-content: flex-end;
+}
+.message-row.user .message {
+  margin-left: auto;
+}
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #f1e2d3;
+  color: #8a5a24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
 .message {
   padding: 10px 12px;
-  margin-bottom: 10px;
   border-radius: 8px;
   max-width: 75%;
   white-space: pre-wrap;
@@ -151,6 +175,34 @@
 .quick-replies button {
   font-size: 12px;
 }
+.ticket-form {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed #e2d6c4;
+  border-radius: 6px;
+  background: #fffaf4;
+  font-size: 12px;
+}
+.ticket-form label {
+  display: block;
+  margin: 6px 0 2px;
+  color: #5b5b5b;
+}
+.ticket-form input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+.ticket-form .actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+.ticket-form .error {
+  margin-top: 6px;
+  color: #d9534f;
+}
 </style>
 
 <script>
@@ -168,6 +220,12 @@
 
   const STORAGE_KEY = "ai_css_chat_session";
   const MESSAGE_KEY = "ai_css_chat_messages";
+  // Onboarding state is kept client-side to avoid extra DocTypes/migrations.
+  const ONBOARDING_KEY_PREFIX = "ai_css_chat_onboarding_";
+  const CONTACT_KEY_PREFIX = "ai_css_chat_contact_";
+  const POLL_INTERVAL_MS = 4000;
+  let pollIntervalId = null;
+  let lastServerTs = null;
 
   function getSessionId() {
     const existing = localStorage.getItem(STORAGE_KEY);
@@ -175,6 +233,96 @@
     const newId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
     localStorage.setItem(STORAGE_KEY, newId);
     return newId;
+  }
+
+  function onboardingKey(sessionId) {
+    return `${ONBOARDING_KEY_PREFIX}${sessionId}`;
+  }
+
+  function contactKey(sessionId) {
+    return `${CONTACT_KEY_PREFIX}${sessionId}`;
+  }
+
+  function getOnboardingState(sessionId) {
+    const raw = localStorage.getItem(onboardingKey(sessionId));
+    if (!raw) return { stage: "ASK_NAME", name: "", mood: "" };
+    try {
+      const parsed = JSON.parse(raw);
+      return { stage: parsed.stage || "ASK_NAME", name: parsed.name || "", mood: parsed.mood || "" };
+    } catch (e) {
+      return { stage: "ASK_NAME", name: "", mood: "" };
+    }
+  }
+
+  function setOnboardingState(sessionId, state) {
+    localStorage.setItem(onboardingKey(sessionId), JSON.stringify(state));
+  }
+
+  function clearOnboardingState(sessionId) {
+    localStorage.removeItem(onboardingKey(sessionId));
+  }
+
+  function getContactState(sessionId) {
+    const raw = localStorage.getItem(contactKey(sessionId));
+    if (!raw) return { name: "", email: "", phone: "" };
+    try {
+      const parsed = JSON.parse(raw);
+      return { name: parsed.name || "", email: parsed.email || "", phone: parsed.phone || "" };
+    } catch (e) {
+      return { name: "", email: "", phone: "" };
+    }
+  }
+
+  function setContactState(sessionId, data) {
+    localStorage.setItem(contactKey(sessionId), JSON.stringify(data));
+  }
+
+  function extractName(text) {
+    const cleaned = text.trim();
+    if (!cleaned) return "";
+    const patterns = [
+      /my name is\s+([a-zA-Z]{2,20})/i,
+      /i am\s+([a-zA-Z]{2,20})/i,
+      /i'm\s+([a-zA-Z]{2,20})/i,
+      /this is\s+([a-zA-Z]{2,20})/i,
+    ];
+    for (const pattern of patterns) {
+      const match = cleaned.match(pattern);
+      if (match && match[1]) return match[1];
+    }
+    if (/^[a-zA-Z]{2,20}$/.test(cleaned)) {
+      return cleaned;
+    }
+    return "";
+  }
+
+  function looksLikeIssue(text) {
+    const lower = text.toLowerCase();
+    const keywords = ["refund", "payment", "booking", "ticket", "cancel", "cancellation", "show", "amount", "transaction", "confirmation", "status", "problem", "issue", "help"];
+    if (keywords.some(k => lower.includes(k))) return true;
+    if (text.length > 25) return true;
+    if (text.includes("?")) return true;
+    return false;
+  }
+
+  function onboardingPrompt(stage, name) {
+    const lang = langSelect.value === "hi" ? "hi" : "en";
+    if (stage === "ASK_NAME") {
+      return lang === "hi"
+        ? "नमस्ते! मैं BookYourShow AI Assistant हूँ 👋 आपका नाम क्या है?"
+        : "Hi! I’m the BookYourShow AI Assistant 👋 What’s your name?";
+    }
+    if (stage === "ASK_MOOD") {
+      return lang === "hi"
+        ? `आशा है आप ठीक होंगे, ${name || "दोस्त"}. मैं आपकी किस तरह मदद कर सकता हूँ?`
+        : `Hope you are doing good today, ${name || "there"}. How may I help you?`;
+    }
+    if (stage === "ASK_HELP") {
+      return lang === "hi"
+        ? "मैं आपकी किस विषय में मदद कर सकता हूँ — बुकिंग, रिफंड या पेमेंट?"
+        : "How can I help you today — booking, refund, or payment?";
+    }
+    return "";
   }
 
   function setStatus(ok, text) {
@@ -215,17 +363,35 @@
     localStorage.setItem(MESSAGE_KEY, JSON.stringify(messages.slice(-20)));
   }
 
+  function updateLastServerTs(messages) {
+    const created = messages
+      .filter(msg => msg.id)
+      .map(msg => msg.created_at)
+      .filter(Boolean)
+      .map(ts => new Date(ts).getTime())
+      .filter(ts => !Number.isNaN(ts));
+    if (!created.length) return;
+    lastServerTs = new Date(Math.max(...created)).toISOString();
+  }
+
   function renderMessages(messages) {
     messageList.innerHTML = "";
     messages.slice(-20).forEach((msg, idx) => renderMessage(msg, idx, messages));
     messageList.scrollTop = messageList.scrollHeight;
+    updateLastServerTs(messages);
   }
 
   function renderMessage(msg, index, messages) {
-    const div = document.createElement("div");
-    div.className = `message ${msg.role}`;
-    div.textContent = msg.content;
+    const row = document.createElement("div");
+    row.className = `message-row ${msg.role}`;
+    const bubble = document.createElement("div");
+    bubble.className = `message ${msg.role}`;
+    bubble.textContent = msg.content;
     if (msg.role === "assistant") {
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "BYS";
+      row.appendChild(avatar);
       const details = document.createElement("div");
       details.className = "details";
       const meta = document.createElement("div");
@@ -244,8 +410,9 @@
         }).join(" · ");
         details.appendChild(src);
       }
-      div.appendChild(details);
-      if (msg.escalation_offered && !(msg.quick_replies && msg.quick_replies.length)) {
+      bubble.appendChild(details);
+      const showEscalation = (msg.escalation_offered || msg.contact_required) && !(msg.quick_replies && msg.quick_replies.length);
+      if (showEscalation) {
         const actions = document.createElement("div");
         actions.className = "sources";
         actions.innerHTML = `
@@ -253,14 +420,21 @@
           <button class="btn btn-sm btn-secondary" data-action="continue">Continue Chat</button>
         `;
         actions.querySelector('[data-action="create"]').addEventListener("click", () => {
-          createTicket(index);
-        });
-        actions.querySelector('[data-action="continue"]').addEventListener("click", () => {
-          msg.escalation_offered = false;
+          msg.show_contact_form = true;
           saveMessages(messages);
           renderMessages(messages);
         });
-        div.appendChild(actions);
+        actions.querySelector('[data-action="continue"]').addEventListener("click", () => {
+          msg.escalation_offered = false;
+          msg.contact_required = false;
+          msg.show_contact_form = false;
+          saveMessages(messages);
+          renderMessages(messages);
+        });
+        bubble.appendChild(actions);
+      }
+      if (msg.show_contact_form) {
+        bubble.appendChild(renderContactForm(msg, index, messages));
       }
       if (msg.quick_replies && msg.quick_replies.length) {
         const quick = document.createElement("div");
@@ -272,13 +446,206 @@
           btn.addEventListener("click", () => sendMessage(text));
           quick.appendChild(btn);
         });
-        div.appendChild(quick);
+        bubble.appendChild(quick);
       }
+      row.appendChild(bubble);
+    } else {
+      row.appendChild(bubble);
     }
-    messageList.appendChild(div);
+    messageList.appendChild(row);
   }
 
-  async function createTicket(messageIndex) {
+  // Merge server messages with local cache, preserving order and avoiding duplicates.
+  function mergeMessages(localMessages, incoming) {
+    const result = [...localMessages];
+    const byId = new Map();
+    result.forEach((msg, idx) => {
+      if (msg.id) byId.set(msg.id, idx);
+    });
+
+    const isNear = (a, b) => {
+      if (!a || !b) return true;
+      const ta = new Date(a).getTime();
+      const tb = new Date(b).getTime();
+      return Math.abs(ta - tb) < 5000;
+    };
+
+    incoming.forEach(msg => {
+      if (msg.id && byId.has(msg.id)) {
+        const idx = byId.get(msg.id);
+        result[idx] = { ...result[idx], ...msg };
+        return;
+      }
+      const idx = result.findIndex(existing =>
+        existing.role === msg.role &&
+        existing.content === msg.content &&
+        isNear(existing.created_at, msg.created_at)
+      );
+      if (idx >= 0) {
+        result[idx] = { ...result[idx], ...msg };
+        return;
+      }
+      result.push(msg);
+    });
+
+    return result.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return ta - tb;
+    });
+  }
+
+  function validateContact(name, email, phone) {
+    const trimmedName = (name || "").trim();
+    const trimmedEmail = (email || "").trim().toLowerCase();
+    const rawPhone = (phone || "").trim();
+    const phoneDigits = rawPhone.replace(/\D/g, "");
+    if (trimmedEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmedEmail)) {
+      return { ok: false, error: "Please enter a valid email address." };
+    }
+    if (phoneDigits && phoneDigits.length < 10) {
+      return { ok: false, error: "Please enter a valid phone number." };
+    }
+    if (!trimmedEmail && !phoneDigits) {
+      return { ok: false, error: "Please provide at least an email or phone." };
+    }
+    return {
+      ok: true,
+      name: trimmedName,
+      email: trimmedEmail,
+      phone: phoneDigits
+    };
+  }
+
+  function renderContactForm(msg, index, messages) {
+    const sessionId = getSessionId();
+    const stored = getContactState(sessionId);
+    const form = document.createElement("div");
+    form.className = "ticket-form";
+    form.innerHTML = `
+      <div><strong>Contact details required to create a ticket</strong></div>
+      <label>Name (optional)</label>
+      <input type="text" data-field="name" placeholder="Your name" />
+      <label>Email (optional)</label>
+      <input type="email" data-field="email" placeholder="you@example.com" />
+      <label>Phone (optional)</label>
+      <input type="tel" data-field="phone" placeholder="10-digit phone" />
+      <div class="actions">
+        <button class="btn btn-sm btn-primary" data-action="submit">Submit Ticket</button>
+        <button class="btn btn-sm btn-secondary" data-action="cancel">Cancel</button>
+      </div>
+      <div class="error" style="display:none;"></div>
+    `;
+    const nameInput = form.querySelector('[data-field="name"]');
+    const emailInput = form.querySelector('[data-field="email"]');
+    const phoneInput = form.querySelector('[data-field="phone"]');
+    nameInput.value = stored.name || "";
+    emailInput.value = stored.email || "";
+    phoneInput.value = stored.phone || "";
+    const errorBox = form.querySelector(".error");
+
+    form.querySelector('[data-action="cancel"]').addEventListener("click", () => {
+      msg.show_contact_form = false;
+      saveMessages(messages);
+      renderMessages(messages);
+    });
+
+    form.querySelector('[data-action="submit"]').addEventListener("click", async () => {
+      const validation = validateContact(nameInput.value, emailInput.value, phoneInput.value);
+      if (!validation.ok) {
+        errorBox.textContent = validation.error;
+        errorBox.style.display = "block";
+        return;
+      }
+      errorBox.style.display = "none";
+      const payload = {
+        customer_name: validation.name,
+        customer_email: validation.email,
+        customer_phone: validation.phone
+      };
+      const contactState = {
+        name: payload.customer_name || stored.name || "",
+        email: payload.customer_email || stored.email || "",
+        phone: payload.customer_phone || stored.phone || ""
+      };
+      setContactState(sessionId, contactState);
+      await createTicket(index, payload);
+    });
+    return form;
+  }
+
+  function updateLastServerTs(messages) {
+    const latest = messages.reduce((acc, msg) => {
+      if (!msg.created_at || !msg.id) return acc;
+      const ts = new Date(msg.created_at).toISOString();
+      if (!acc || ts > acc) return ts;
+      return acc;
+    }, null);
+    if (latest) lastServerTs = latest;
+  }
+
+  // Polling keeps the guest page simple while still providing near real-time updates.
+  async function pollMessages() {
+    const sessionId = getSessionId();
+    if (!sessionId) return;
+    try {
+      const params = new URLSearchParams({ session_id: sessionId, limit: "20" });
+      if (lastServerTs) {
+        params.append("since", lastServerTs);
+      }
+      const res = await fetch(`/api/method/ai_powered_css.api.chat.get_messages?${params.toString()}`, {
+        method: "GET",
+        headers: {
+          "X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || ""
+        }
+      });
+      const data = await res.json();
+      const payload = data.message || data;
+      const serverMessages = payload.messages || [];
+      if (!Array.isArray(serverMessages) || serverMessages.length === 0) {
+        setStatus(true, "Connected");
+        return;
+      }
+      const messages = mergeMessages(loadMessages(), serverMessages);
+      saveMessages(messages);
+      renderMessages(messages);
+      updateLastServerTs(messages);
+      setStatus(true, "Connected");
+    } catch (err) {
+      setStatus(false, "Disconnected");
+    }
+  }
+
+  function startPolling() {
+    if (pollIntervalId) return;
+    pollIntervalId = setInterval(pollMessages, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (!pollIntervalId) return;
+    clearInterval(pollIntervalId);
+    pollIntervalId = null;
+  }
+
+  function normalizeIncoming(msg) {
+    return {
+      id: msg.id || null,
+      role: msg.role,
+      content: msg.content,
+      confidence: msg.confidence,
+      sources: msg.sources || [],
+      language: msg.language,
+      resolution_state: msg.resolution_state,
+      escalation_offered: msg.escalation_offered,
+      contact_required: msg.contact_required || false,
+      quick_replies: msg.quick_replies || [],
+      ticket_id: msg.ticket_id || null,
+      ticket_type: msg.ticket_type || null,
+      created_at: msg.created_at || new Date().toISOString()
+    };
+  }
+
+  async function createTicket(messageIndex, contactPayload) {
     const sessionId = getSessionId();
     setStatus(false, "Creating ticket…");
     try {
@@ -288,9 +655,16 @@
           "Content-Type": "application/json",
           "X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || ""
         },
-        body: JSON.stringify({ session_id: sessionId })
+        body: JSON.stringify({
+          session_id: sessionId,
+          ...(contactPayload || {})
+        })
       });
       const data = await res.json();
+      if (!res.ok) {
+        const errorMessage = (data && data.exception) ? data.exception : "Unable to create ticket.";
+        throw new Error(errorMessage);
+      }
       const payload = data.message || data;
       if (!payload.ticket_id) {
         throw new Error("ticket_id missing");
@@ -298,20 +672,29 @@
       const messages = loadMessages();
       if (messages[messageIndex]) {
         messages[messageIndex].escalation_offered = false;
+        messages[messageIndex].contact_required = false;
+        messages[messageIndex].show_contact_form = false;
         messages[messageIndex].ticket_id = payload.ticket_id;
         messages[messageIndex].ticket_type = payload.ticket_type;
       }
       const lang = (messages[messageIndex] && messages[messageIndex].language) || langSelect.value;
-      banner.textContent = lang === "hi"
-        ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`
-        : `Ticket created: #${payload.ticket_id}`;
+      const contactText = payload.customer_email || payload.customer_phone || "";
+      if (lang === "hi") {
+        banner.textContent = contactText
+          ? `🎫 आपका टिकट बन गया है: #${payload.ticket_id}। हम ${contactText} पर संपर्क करेंगे।`
+          : `🎫 आपका टिकट बन गया है: #${payload.ticket_id}`;
+      } else {
+        banner.textContent = contactText
+          ? `Ticket #${payload.ticket_id} created. We’ll contact you at ${contactText} within 24 hours.`
+          : `Ticket created: #${payload.ticket_id}`;
+      }
       banner.style.display = "block";
       saveMessages(messages);
       renderMessages(messages);
       setStatus(true, "Connected");
     } catch (err) {
       setStatus(false, "Error");
-      banner.textContent = "Unable to create ticket. Please try again.";
+      banner.textContent = err && err.message ? err.message : "Unable to create ticket. Please try again.";
       banner.style.display = "block";
     }
   }
@@ -319,21 +702,50 @@
   function setNewSession() {
     const newId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now());
     localStorage.setItem(STORAGE_KEY, newId);
+    lastServerTs = null;
     return newId;
   }
 
-  async function sendMessage(overrideText) {
-    const text = (overrideText || input.value).trim();
-    if (!text) return;
+  function appendMessage(messages, msg) {
+    messages.push({ ...msg, created_at: msg.created_at || new Date().toISOString() });
+  }
 
-    banner.style.display = "none";
-    const messages = loadMessages();
-    const userMsg = { role: "user", content: text };
-    messages.push(userMsg);
-    saveMessages(messages);
-    renderMessages(messages);
-    input.value = "";
+  function handleOnboardingInput(text, messages) {
+    const sessionId = getSessionId();
+    const state = getOnboardingState(sessionId);
+    if (state.stage === "DONE") return false;
+    if (looksLikeIssue(text)) {
+      state.stage = "DONE";
+      setOnboardingState(sessionId, state);
+      return false;
+    }
+    if (state.stage === "ASK_NAME") {
+      const name = extractName(text);
+      if (!name) {
+        appendMessage(messages, { role: "assistant", content: "Sorry, I didn’t catch your name. What should I call you?" });
+        setOnboardingState(sessionId, state);
+        return true;
+      }
+      state.name = name;
+      state.stage = "ASK_MOOD";
+      setOnboardingState(sessionId, state);
+      const contact = getContactState(sessionId);
+      if (!contact.name) {
+        setContactState(sessionId, { ...contact, name });
+      }
+      appendMessage(messages, { role: "assistant", content: onboardingPrompt("ASK_MOOD", name) });
+      return true;
+    }
+    if (state.stage === "ASK_MOOD") {
+      state.mood = text.trim();
+      state.stage = "DONE";
+      setOnboardingState(sessionId, state);
+      return false;
+    }
+    return false;
+  }
 
+  async function sendToServer(text, messages) {
     typing.style.display = "block";
     sendBtn.disabled = true;
     setStatus(false, "Connecting…");
@@ -368,10 +780,11 @@
         resolution_state: payload.resolution_state,
         quick_replies: payload.quick_replies || [],
         escalation_offered: payload.escalation_offered || false,
+        contact_required: payload.contact_required || false,
         ticket_id: payload.ticket_id || null,
         ticket_type: payload.ticket_type || null
       };
-      messages.push(assistantMsg);
+      appendMessage(messages, assistantMsg);
       saveMessages(messages);
       renderMessages(messages);
       setStatus(true, "Connected");
@@ -385,14 +798,32 @@
       }
     } catch (err) {
       setStatus(false, "Error");
-      const messages = loadMessages();
-      messages.push({ role: "assistant", content: "Sorry, something went wrong. Please try again.", confidence: 0, sources: [] });
+      appendMessage(messages, { role: "assistant", content: "Sorry, something went wrong. Please try again.", confidence: 0, sources: [] });
       saveMessages(messages);
       renderMessages(messages);
     } finally {
       typing.style.display = "none";
       sendBtn.disabled = false;
     }
+  }
+
+  async function sendMessage(overrideText) {
+    const text = (overrideText || input.value).trim();
+    if (!text) return;
+
+    banner.style.display = "none";
+    const messages = loadMessages();
+    appendMessage(messages, { role: "user", content: text });
+    saveMessages(messages);
+    renderMessages(messages);
+    input.value = "";
+
+    if (handleOnboardingInput(text, messages)) {
+      saveMessages(messages);
+      renderMessages(messages);
+      return;
+    }
+    await sendToServer(text, messages);
   }
 
   sendBtn.addEventListener("click", () => sendMessage());
@@ -406,9 +837,12 @@
   newChatBtn.addEventListener("click", () => {
     if (!confirm("Clear chat and start a new session?")) return;
     localStorage.removeItem(MESSAGE_KEY);
-    setNewSession();
+    const newId = setNewSession();
+    clearOnboardingState(newId);
+    setContactState(newId, { name: "", email: "", phone: "" });
     banner.style.display = "none";
     renderMessages([]);
+    startOnboardingIfNeeded();
   });
 
   toggleDetailsBtn.addEventListener("click", () => {
@@ -416,7 +850,22 @@
     toggleDetailsBtn.textContent = container.classList.contains("show-details") ? "Hide details" : "Show details";
   });
 
+  function startOnboardingIfNeeded() {
+    const sessionId = getSessionId();
+    const messages = loadMessages();
+    if (messages.length > 0) return;
+    const state = getOnboardingState(sessionId);
+    if (state.stage === "DONE") return;
+    appendMessage(messages, { role: "assistant", content: onboardingPrompt("ASK_NAME") });
+    setOnboardingState(sessionId, { ...state, stage: "ASK_NAME" });
+    saveMessages(messages);
+    renderMessages(messages);
+  }
+
   renderMessages(loadMessages());
+  startOnboardingIfNeeded();
+  pollMessages();
+  startPolling();
 })();
 </script>
 {% endblock %}

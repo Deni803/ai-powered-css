@@ -2,9 +2,13 @@
 set -euo pipefail
 
 ENV_FILE="${ENV_FILE:-infra/.env}"
-BASE_URL="${CHAT_BASE_URL:-http://localhost:8080}"
+BASE_URL="${CHAT_BASE_URL:-http://localhost:8000}"
 API_URL="${BASE_URL}/api/method/ai_powered_css.api.chat.send_message"
+API_TICKET_URL="${BASE_URL}/api/method/ai_powered_css.api.chat.create_ticket"
 API_STATUS_URL="${BASE_URL}/api/method/ai_powered_css.api.chat.get_ticket_status"
+API_MESSAGES_URL="${BASE_URL}/api/method/ai_powered_css.api.chat.get_messages"
+RAG_HEALTH_URL="${RAG_HEALTH_URL:-http://localhost:8001/health}"
+QDRANT_HEALTH_URL="${QDRANT_HEALTH_URL:-http://localhost:6333/healthz}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "ERROR: Missing env file at $ENV_FILE"
@@ -31,7 +35,11 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-SESSION_BASE="chat-$(date +%s)"
+SESSION_BASE="chat-$(date +%s)-$(python3 - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:8])
+PY
+)"
 
 WAIT_ATTEMPTS="${CHAT_WAIT_ATTEMPTS:-60}"
 WAIT_SLEEP="${CHAT_WAIT_SLEEP:-2}"
@@ -54,11 +62,33 @@ if ! wait_for_url "$BASE_URL/"; then
   exit 1
 fi
 
+if ! wait_for_url "$RAG_HEALTH_URL"; then
+  echo "ERROR: RAG service not reachable at $RAG_HEALTH_URL"
+  exit 1
+fi
+
+if ! wait_for_url "$QDRANT_HEALTH_URL"; then
+  echo "ERROR: Qdrant not reachable at $QDRANT_HEALTH_URL"
+  exit 1
+fi
+
 request_json() {
   local url="$1"
   local data="$2"
   local response
   response=$(curl -sS -w "\n%{http_code}" -H "Content-Type: application/json" -X POST "$url" -d "$data")
+  local body
+  local code
+  body=$(echo "$response" | sed '$d')
+  code=$(echo "$response" | tail -n 1)
+  echo "$code" > /tmp/chat_last_code.txt
+  echo "$body" > /tmp/chat_last_body.json
+}
+
+request_ticket_json() {
+  local data="$1"
+  local response
+  response=$(curl -sS -w "\n%{http_code}" -H "Content-Type: application/json" -X POST "$API_TICKET_URL" -d "$data")
   local body
   local code
   body=$(echo "$response" | sed '$d')
@@ -90,6 +120,7 @@ summary = {
   "ticket_type": payload.get("ticket_type"),
   "escalated": payload.get("escalated"),
   "escalation_offered": payload.get("escalation_offered"),
+  "contact_required": payload.get("contact_required"),
   "quick_replies_count": len(payload.get("quick_replies") or []),
 }
 print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -242,9 +273,30 @@ import json
 with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
     body = json.load(f)
 resp = body.get("message", body)
-if not resp.get("ticket_id"):
-    raise SystemExit("ERROR: expected ticket for explicit request")
+if resp.get("ticket_id"):
+    raise SystemExit("ERROR: ticket should not be created before contact")
+if not resp.get("contact_required"):
+    raise SystemExit("ERROR: expected contact_required for explicit request")
 PY
+
+# Provide contact to create ticket
+CREATE_TICKET_PAYLOAD=$(python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "session_id": os.environ.get("SESSION_ID", ""),
+  "customer_name": "Test User",
+  "customer_email": "test@example.com",
+  "customer_phone": ""
+}))
+PY
+)
+request_ticket_json "$CREATE_TICKET_PAYLOAD"
+if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
+  echo "ERROR: create_ticket failed"
+  cat /tmp/chat_last_body.json
+  exit 1
+fi
+print_response "ROMAN_HI_TICKET_CREATED"
 
 # Manual override: Hindi mode forces Hindi
 SESSION_ID="${SESSION_BASE}-force-hi"
@@ -462,13 +514,29 @@ import json, os
 with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
     body = json.load(f)
 resp = body.get("message", body)
-if not resp.get("ticket_id"):
-    raise SystemExit("ERROR: expected ticket after repeated clarification failures")
-if os.getenv("CHAT_REQUIRE_HD_TICKET", "").lower() in ("1", "true", "yes") and resp.get("ticket_type") != "HD Ticket":
-    raise SystemExit(f"ERROR: expected HD Ticket, got {resp.get('ticket_type')}")
+if resp.get("ticket_id"):
+    raise SystemExit("ERROR: ticket should not be created before contact")
+if not resp.get("contact_required"):
+    raise SystemExit("ERROR: expected contact_required after repeated failures")
 PY
 
-# Ticket format test
+# Create ticket with contact info
+CREATE_TICKET_PAYLOAD=$(python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "session_id": os.environ.get("SESSION_ID", ""),
+  "customer_name": "Test User",
+  "customer_email": "test@example.com",
+  "customer_phone": "9999999999"
+}))
+PY
+)
+request_ticket_json "$CREATE_TICKET_PAYLOAD"
+if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
+  echo "ERROR: create_ticket failed after escalation"
+  cat /tmp/chat_last_body.json
+  exit 1
+fi
 TICKET_ID=$(python3 - <<'PY'
 import json
 with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
@@ -477,6 +545,18 @@ resp = body.get("message", body)
 print(resp.get("ticket_id") or "")
 PY
 )
+if [ -z "$TICKET_ID" ]; then
+  echo "ERROR: expected ticket id after contact submission"
+  exit 1
+fi
+python3 - <<'PY'
+import json, os
+with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
+    body = json.load(f)
+resp = body.get("message", body)
+if os.getenv("CHAT_REQUIRE_HD_TICKET", "").lower() in ("1", "true", "yes") and resp.get("ticket_type") != "HD Ticket":
+    raise SystemExit(f"ERROR: expected HD Ticket, got {resp.get('ticket_type')}")
+PY
 STATUS_RESPONSE=$(curl -sS -w "\n%{http_code}" -G --data-urlencode "ticket_id=${TICKET_ID}" --data-urlencode "include_description=1" "$API_STATUS_URL")
 STATUS_BODY=$(echo "$STATUS_RESPONSE" | sed '$d')
 STATUS_CODE=$(echo "$STATUS_RESPONSE" | tail -n 1)
@@ -493,11 +573,10 @@ with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
 resp = body.get("message", body)
 desc = resp.get("description") or ""
 required = [
-    "Customer Summary",
-    "Key Details Extracted",
+    "Customer Details",
+    "Issue Summary",
     "Conversation Transcript",
-    "Sources Used",
-    "Assistant Recommendation / Next Steps",
+    "Knowledge Base Sources Used",
     "System Metadata",
 ]
 for item in required:
@@ -518,6 +597,44 @@ print(json.dumps({
 PY
 )
 request_json "$API_URL" "$QUERY_NEW_CHAT"
+
+# get_messages endpoint sanity check (real-time fallback)
+SESSION_ID="${SESSION_BASE}-realtime"
+export SESSION_ID
+QUERY_RT=$(python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "session_id": os.environ.get("SESSION_ID", ""),
+  "message": "payment deducted but no confirmation",
+  "lang_hint": "en"
+}))
+PY
+)
+request_json "$API_URL" "$QUERY_RT"
+if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
+  echo "ERROR: real-time seed query failed"
+  cat /tmp/chat_last_body.json
+  exit 1
+fi
+RT_RESPONSE=$(curl -sS -w "\n%{http_code}" -G --data-urlencode "session_id=${SESSION_ID}" --data-urlencode "limit=20" "$API_MESSAGES_URL")
+RT_BODY=$(echo "$RT_RESPONSE" | sed '$d')
+RT_CODE=$(echo "$RT_RESPONSE" | tail -n 1)
+if [ "$RT_CODE" != "200" ]; then
+  echo "ERROR: get_messages failed"
+  echo "$RT_BODY"
+  exit 1
+fi
+echo "$RT_BODY" > /tmp/chat_last_body.json
+python3 - <<'PY'
+import json
+with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
+    body = json.load(f)
+resp = body.get("message", body)
+msgs = resp.get("messages") or []
+if len(msgs) < 2:
+    raise SystemExit("ERROR: expected at least 2 messages from get_messages")
+print(json.dumps({"label": "GET_MESSAGES", "count": len(msgs)}, indent=2))
+PY
 if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
   echo "ERROR: new chat query failed"
   cat /tmp/chat_last_body.json

@@ -68,3 +68,20 @@ Customer -> Chat UI -> RAG service (retrieve + generate) -> Confidence gate -> F
 - Commands: `make up-helpdesk-official`, `make verify-full` (reran after Helpdesk finished initializing).
 - Outputs: `make verify-full` passed; chat-test validated auto English, Roman Hindi, quick-reply retrieval + follow-up, explicit ticket request, repeated clarification escalation, and ticket format sections (ticket #6). 
 - Known issues: occasional curl connection resets during Qdrant-down simulation; retries handle this.
+
+## Module 4.6 (2026-01-28)
+- Changes: switched to a single Postgres-only compose stack, removed MariaDB profiles, added Helpdesk SLA Postgres patch, and enabled polling-based real-time chat updates via `get_messages`.
+- Commands: `make down -v`, `make up`, `make verify-full`.
+- Outputs: `make verify-full` passed on Postgres (rag-test + chat-test + smoke).
+- Known issues: none new; Postgres SLA issue resolved.
+
+## Module 4.7 (2026-01-29)
+- Changes: added UI-only onboarding flow (name → mood → help intent) stored in localStorage, required contact capture before ticket creation, clarified ticket description sections with customer details, standardized polling-only realtime flow, and restored guest context to avoid “User None is disabled” errors.
+- Commands: `make verify-full`.
+- Outputs: `make verify-full` passed (rag-test + chat-test + smoke).
+- Known issues: none new.
+
+## Module 4.7.1 (2026-01-29)
+- Changes: updated branding to BookYourShow in chat UI, adjusted onboarding prompt copy, added assistant avatar for friendlier UI, and refreshed documentation (root README + docs index + deployment URLs).
+- Commands: n/a (UI + docs only).
+- Known issues: none new.

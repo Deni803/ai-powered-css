@@ -52,3 +52,12 @@
 - Escalation offer/auto rules aligned to multi-turn support flow.
 - Suppressed external channel suggestions unless grounded in KB context.
 - Improved ticket readability with structured sections, metadata, and bounded transcript.
+
+## Module 4.6
+- Postgres-only Helpdesk stack (single compose file).
+- Polling-based real-time chat updates via `get_messages` (guest-friendly, low overhead).
+
+## Module 4.7
+- Conversational onboarding in chat UI (name → mood → help intent) stored in localStorage.
+- Contact capture (email/phone) required before ticket creation.
+- Ticket descriptions now include customer details and clearer sectioning.

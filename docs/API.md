@@ -1,5 +1,76 @@
 # API (Draft)
 
+## Frappe Chat API (current)
+Base URL: `http://localhost:8000`
+
+### POST /api/method/ai_powered_css.api.chat.send_message
+Send a message to the assistant.
+
+Request
+```json
+{
+  "session_id": "abc123",
+  "message": "Refund status",
+  "lang_hint": "en"
+}
+```
+
+Response (trimmed)
+```json
+{
+  "session_id": "abc123",
+  "answer": "...",
+  "confidence": 0.78,
+  "language": "en",
+  "sources": [],
+  "resolution_state": "NEEDS_CLARIFICATION",
+  "quick_replies": []
+}
+```
+
+### GET /api/method/ai_powered_css.api.chat.get_messages
+Fetch recent messages for real-time UI updates (polling).
+
+Query params
+```
+session_id=abc123&limit=20&since=2026-01-28T00:00:00Z
+```
+
+Response
+```json
+{
+  "session_id": "abc123",
+  "messages": [
+    {"id": "...", "role": "user", "content": "...", "created_at": "..."}
+  ]
+}
+```
+
+### POST /api/method/ai_powered_css.api.chat.create_ticket
+Create a Helpdesk ticket from the current session. Requires at least one contact detail.
+
+Request
+```json
+{
+  "session_id": "abc123",
+  "customer_name": "Aditi",
+  "customer_email": "aditi@example.com",
+  "customer_phone": "9876543210"
+}
+```
+
+Response
+```json
+{
+  "ticket_id": "42",
+  "ticket_type": "HD Ticket",
+  "customer_email": "aditi@example.com"
+}
+```
+
+### GET /api/method/ai_powered_css.api.chat.get_ticket_status
+Fetch ticket status (optionally include description).
+
 ## Chat Service
 ### POST /api/chat
 Send a user message and receive an AI response or ticket escalation.

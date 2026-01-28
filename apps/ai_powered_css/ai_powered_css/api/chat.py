@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import uuid
 from typing import Any
 
@@ -85,6 +86,9 @@ _SUPPORT_REQUEST_WORDS = {
     "मदद",
     "कॉल",
 }
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
 
 _REFUND_WORDS = {
     "refund",
@@ -233,6 +237,7 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _roman_hindi_decision(text: str) -> str:
+    # High-precision Roman Hindi detection to avoid false positives on English-only queries.
     if not _is_ascii(text):
         return "en"
     tokens = _tokenize(text)
@@ -421,6 +426,7 @@ def _is_vague_domain(message: str, intent: str | None) -> bool:
 
 
 def _sanitize_answer(answer: str, lang: str) -> str:
+    # Remove out-of-scope channel suggestions unless explicitly present in KB content.
     banned = [
         "live chat",
         "email",
@@ -460,6 +466,32 @@ def _offer_ticket_prompt(lang: str) -> str:
     return "I couldn't confirm this from the knowledge base. Would you like me to create a support ticket?"
 
 
+def _contact_request_prompt(lang: str) -> str:
+    if lang == "hi":
+        return "टिकट बनाने के लिए कृपया अपना ईमेल या फोन नंबर साझा करें।"
+    return "To create a support ticket, please share your email or phone number."
+
+
+def _normalize_contact(
+    customer_name: str | None,
+    customer_email: str | None,
+    customer_phone: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    name = (customer_name or "").strip() or None
+    email = (customer_email or "").strip().lower() or None
+    phone_raw = (customer_phone or "").strip()
+    phone_digits = re.sub(r"\D", "", phone_raw) if phone_raw else ""
+    phone = phone_digits or None
+
+    if email and not _EMAIL_RE.match(email):
+        frappe.throw(_("Invalid email address."))
+    if phone and len(phone) < 10:
+        frappe.throw(_("Invalid phone number."))
+    if not email and not phone:
+        frappe.throw(_("Email or phone is required to create a ticket."))
+    return name, email, phone
+
+
 def _count_clarification_prompts(history: list[dict[str, str]]) -> int:
     phrases = [
         "Could you share which issue you are facing?",
@@ -482,6 +514,7 @@ def _count_clarification_prompts(history: list[dict[str, str]]) -> int:
 
 
 def _needs_clarification(text: str) -> tuple[bool, str | None]:
+    # Require key details for refund/payment before attempting escalation.
     intent = _detect_intent(text)
     if intent in ("refund", "payment"):
         if _matches_issue_pattern(text):
@@ -516,6 +549,7 @@ def _get_env_int(key: str, default: int) -> int:
 
 
 def _rag_settings() -> dict[str, Any]:
+    # Centralize RAG client settings to keep behavior consistent across endpoints.
     return {
         "rag_url": os.getenv("RAG_URL", "http://rag:8001"),
         "rag_api_key": os.getenv("RAG_API_KEY", ""),
@@ -524,6 +558,7 @@ def _rag_settings() -> dict[str, Any]:
 
 
 def _policy_settings() -> dict[str, Any]:
+    # Escalation thresholds are env-driven for easy tuning without code changes.
     return {
         "conf_threshold": _get_env_float("CONF_THRESHOLD", 0.7),
         "very_low_threshold": _get_env_float("VERY_LOW_THRESHOLD", 0.2),
@@ -543,6 +578,7 @@ def _get_session_doc(session_id: str | None):
 
 
 def _ensure_session(session_id: str | None, language: str, session_doc=None) -> tuple[str, str, Any]:
+    # Create a session record on-demand; update preferred language if it changed.
     if session_doc is None:
         session_doc = _get_session_doc(session_id)
 
@@ -583,7 +619,8 @@ def _insert_message(
     content: str,
     confidence: float | None = None,
     sources: list[dict] | None = None,
-) -> None:
+):
+    # Persist chat messages for history + polling retrieval.
     doc = frappe.get_doc(
         {
             "doctype": "AI CSS Chat Message",
@@ -595,6 +632,35 @@ def _insert_message(
         }
     )
     doc.insert(ignore_permissions=True)
+    return doc
+
+
+def _publish_chat_message(
+    session_id: str,
+    message_doc,
+    sources: list[dict] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    # Best-effort realtime publish; polling reads from DB via get_messages.
+    payload = {
+        "session_id": session_id,
+        "message": {
+            "id": message_doc.name,
+            "role": message_doc.role,
+            "content": message_doc.content,
+            "confidence": message_doc.confidence,
+            "sources": sources or [],
+            "created_at": message_doc.creation,
+        },
+    }
+    if extra:
+        payload["message"].update(extra)
+    frappe.publish_realtime(
+        "ai_css_chat_message",
+        payload,
+        room="website",
+        after_commit=True,
+    )
 
 
 def _fetch_history(session_name: str, limit: int = 20) -> list[dict[str, str]]:
@@ -701,11 +767,11 @@ def _top_score_from_sources(sources: list[dict]) -> float | None:
 
 
 def _evaluate_sources(sources: list[dict], min_top_score: float) -> tuple[list[dict], float, bool]:
+    # Filter weak sources to avoid answering without evidence.
     if not sources:
         return [], 0.0, False
-    top_score = 0.0
     try:
-        top_score = float(sources[0].get("score") or 0.0)
+        top_score = max(float(item.get("score") or 0.0) for item in sources)
     except Exception:
         top_score = 0.0
     usable = top_score >= min_top_score
@@ -728,6 +794,7 @@ def _create_ticket_for_session(
     sources: list[dict],
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str | None, str | None]:
+    # Prefer HD Ticket; allow ToDo fallback only when explicitly enabled.
     allow_todo = os.getenv("ESCALATION_FALLBACK", "").lower() == "todo"
     if frappe.db.exists("DocType", "HD Ticket"):
         doctype = "HD Ticket"
@@ -751,24 +818,31 @@ def _handle_unresolved(
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     sources = sources or []
-    ticket_type, ticket_id = _create_ticket_for_session(history, message, sources, metadata=metadata)
-    if ticket_id:
-        answer = _ticket_created_reply(language, ticket_id)
-        escalated = True
-    else:
-        answer = (
-            _ticket_created_reply(language, None)
-            + "\n\nTicketing is not enabled. Start the official Helpdesk profile (make up-helpdesk-official)."
-        )
-        escalated = False
-    _insert_message(session_name, "assistant", answer, confidence=0.0, sources=sources)
+    answer = _contact_request_prompt(language)
+    escalated = False
+    ticket_id = None
+    ticket_type = None
+    assistant_doc = _insert_message(session_name, "assistant", answer, confidence=0.0, sources=sources)
     _update_session_state(
         session_doc,
         low_conf_count=0,
         clarification_count=0,
         last_resolution_state=RESOLUTION_UNRESOLVED,
-        last_escalation_offered=False,
+        last_escalation_offered=True,
         preferred_lang=language,
+    )
+    _publish_chat_message(
+        session_id,
+        assistant_doc,
+        sources=sources,
+        extra={
+            "language": language,
+            "resolution_state": RESOLUTION_UNRESOLVED,
+            "escalation_offered": True,
+            "contact_required": True,
+            "ticket_id": ticket_id,
+            "ticket_type": ticket_type,
+        },
     )
     return {
         "session_id": session_id,
@@ -779,14 +853,17 @@ def _handle_unresolved(
         "resolution_state": RESOLUTION_UNRESOLVED,
         "quick_replies": [],
         "escalated": escalated,
-        "escalation_offered": False,
+        "escalation_offered": True,
+        "contact_required": True,
         "ticket_id": ticket_id,
         "ticket_type": ticket_type,
     }
 
 
 def _extract_details(text: str) -> dict[str, str]:
+    # Lightweight entity extraction for ticket summaries (best-effort).
     booking_id = ""
+    transaction_id = ""
     amount = ""
     payment_method = ""
     datetime_info = ""
@@ -795,6 +872,10 @@ def _extract_details(text: str) -> dict[str, str]:
     booking_match = re.search(r"\b[A-Za-z]{1,3}\d{6,12}\b", text)
     if booking_match:
         booking_id = booking_match.group(0)
+
+    transaction_match = re.search(r"\b(?:txn|transaction)[-_\s]?\w{4,}\b", text, re.IGNORECASE)
+    if transaction_match:
+        transaction_id = transaction_match.group(0)
 
     amount_match = re.search(r"(₹\s?\d{2,6}|\b\d{2,6}\s?(?:rs|inr|rupees)\b)", text, re.IGNORECASE)
     if amount_match:
@@ -824,6 +905,7 @@ def _extract_details(text: str) -> dict[str, str]:
 
     return {
         "booking_id": booking_id,
+        "transaction_id": transaction_id,
         "payment_method": payment_method,
         "amount": amount,
         "datetime_info": datetime_info,
@@ -859,6 +941,7 @@ def _ticket_description(
     user_text: str,
     metadata: dict[str, Any] | None = None,
 ) -> str:
+    # Keep ticket body scannable in Helpdesk with explicit sections + newlines.
     details = _extract_details(user_text)
     metadata = metadata or {}
     session_id = metadata.get("session_id") or "n/a"
@@ -866,12 +949,22 @@ def _ticket_description(
     resolution_state = metadata.get("resolution_state") or "n/a"
     confidence = metadata.get("confidence")
     top_score = metadata.get("top_score")
+    customer_name = metadata.get("customer_name") or "Not provided"
+    customer_email = metadata.get("customer_email") or "Not provided"
+    customer_phone = metadata.get("customer_phone") or "Not provided"
+
+    latest_message = (user_text or "").strip() or "Not provided"
     summary_lines = [
-        "### Customer Summary",
-        f"- Issue type: {_guess_issue_type(user_text)}",
+        "### Customer Details",
+        f"- Name: {customer_name}",
+        f"- Email: {customer_email}",
+        f"- Phone: {customer_phone}",
         "",
-        "### Key Details Extracted",
+        "### Issue Summary",
+        f"- Category: {_guess_issue_type(user_text)}",
+        f"- Customer’s latest message: {latest_message}",
         f"- Booking ID: {details['booking_id'] or 'Not provided'}",
+        f"- Transaction ID: {details['transaction_id'] or 'Not provided'}",
         f"- Payment method: {details['payment_method'] or 'Not provided'}",
         f"- Date/time: {details['datetime_info'] or 'Not provided'}",
         f"- Amount: {details['amount'] or 'Not provided'}",
@@ -886,21 +979,15 @@ def _ticket_description(
         summary_lines.append(f"- {role}: {content}")
 
     summary_lines.append("")
-    summary_lines.append("### Sources Used")
+    summary_lines.append("### Knowledge Base Sources Used")
     if sources:
-        for source in sources:
+        for source in sources[:3]:
             title = source.get("title") or source.get("doc_id") or "Source"
             url = source.get("source_url") or "n/a"
             score = source.get("score")
-            summary_lines.append(f"- {title} | {url} | score={score}")
+            summary_lines.append(f"- {title} — {url} (score={score})")
     else:
         summary_lines.append("- Not available")
-
-    summary_lines.append("")
-    summary_lines.append("### Assistant Recommendation / Next Steps")
-    summary_lines.append("- Verify transaction status")
-    summary_lines.append("- Check refund timeline")
-    summary_lines.append("- Respond via the Helpdesk ticket channel")
 
     summary_lines.append("")
     summary_lines.append("### System Metadata")
@@ -921,15 +1008,32 @@ def _create_ticket(
     user_text: str,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
+    # Escalate privileges for guest ticket creation while preserving the original user context.
     current_user = frappe.session.user
     previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
     try:
         frappe.flags.ignore_permissions = True
+        frappe.local.flags.ignore_permissions = True
         frappe.set_user("Administrator")
+        frappe.local.session.user = "Administrator"
+        frappe.session.user = "Administrator"
         description_md = _ticket_description(history=history, sources=sources, user_text=user_text, metadata=metadata)
         description_html = md_to_html(description_md)
 
+        def resolve_priority() -> str | None:
+            # Helpdesk priority doctype can vary; choose a safe default if present.
+            if doctype != "HD Ticket":
+                return "Medium"
+            if frappe.db.exists("DocType", "HD Ticket Priority"):
+                if frappe.db.exists("HD Ticket Priority", "Medium"):
+                    return "Medium"
+                names = frappe.get_all("HD Ticket Priority", pluck="name", limit=1) or []
+                if names:
+                    return names[0]
+            return None
+
         def build_payload(doctype: str) -> dict[str, Any]:
+            # Keep payload minimal and compatible across HD Ticket and ToDo.
             if doctype == "ToDo":
                 return {
                     "doctype": doctype,
@@ -937,15 +1041,35 @@ def _create_ticket(
                     "status": "Open",
                     "priority": "Medium",
                 }
-            return {
+            payload = {
                 "doctype": doctype,
                 "subject": subject,
                 "description": description_html,
                 "status": "Open",
-                "priority": "Medium",
             }
+            priority = resolve_priority()
+            if priority:
+                payload["priority"] = priority
+            return payload
 
         doc = frappe.get_doc(build_payload(doctype))
+        def _coerce_uuid(value):
+            # Some hooks serialize UUIDs; ensure they are JSON-friendly for Postgres.
+            if isinstance(value, uuid.UUID):
+                return str(value)
+            if isinstance(value, dict):
+                return {k: _coerce_uuid(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [_coerce_uuid(v) for v in value]
+            return value
+
+        for field, value in doc.as_dict().items():
+            coerced = _coerce_uuid(value)
+            if coerced is not value:
+                doc.set(field, coerced)
+        doc.flags.ignore_permissions = True
+        doc.flags.ignore_validate = True
+        doc.flags.ignore_mandatory = True
         doc.insert(ignore_permissions=True)
         return doctype, doc.name
     finally:
@@ -956,7 +1080,7 @@ def _create_ticket(
 @frappe.whitelist(allow_guest=True)
 def send_message(session_id: str | None = None, message: str | None = None, lang_hint: str | None = None):
     previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
-    previous_user = frappe.session.user
+    previous_user = frappe.session.user or "Guest"
     frappe.flags.ignore_permissions = True
     frappe.set_user("Administrator")
     try:
@@ -971,6 +1095,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         preferred_lang = getattr(existing_doc, "preferred_lang", None) if existing_doc else None
         forced_lang = lang_hint if lang_hint in ("en", "hi") else None
 
+        # Language selection: forced mode overrides, then Devanagari, then Roman Hindi, then default EN.
         has_devanagari = _detect_language(message) == "hi"
         roman_decision = _roman_hindi_decision(message) if not forced_lang else "en"
         roman_hindi = roman_decision == "hi"
@@ -986,12 +1111,19 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             language = "en"
 
         session_id, session_name, session_doc = _ensure_session(session_id, language, existing_doc)
-        _insert_message(session_name, "user", message)
+        user_doc = _insert_message(session_name, "user", message)
+        _publish_chat_message(
+            session_id,
+            user_doc,
+            sources=[],
+            extra={"language": language},
+        )
 
         language_choice = _is_language_choice(message)
         if language_choice:
+            # Explicit language toggle by user.
             answer = _language_ack("hi" if language_choice == "hi" else "en")
-            _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
             _update_session_state(
                 session_doc,
                 low_conf_count=0,
@@ -999,6 +1131,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 last_resolution_state=RESOLUTION_ANSWERED,
                 last_escalation_offered=False,
                 preferred_lang=language_choice,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": language_choice,
+                    "resolution_state": RESOLUTION_ANSWERED,
+                    "escalation_offered": False,
+                    "quick_replies": [],
+                },
             )
             return {
                 "session_id": session_id,
@@ -1015,14 +1158,26 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             }
 
         if ambiguous_language:
+            # Ask user to choose language instead of guessing.
             prompt, quick_replies = _language_preference_prompt("en")
-            _insert_message(session_name, "assistant", prompt, confidence=None, sources=[])
+            assistant_doc = _insert_message(session_name, "assistant", prompt, confidence=None, sources=[])
             _update_session_state(
                 session_doc,
                 low_conf_count=0,
                 clarification_count=0,
                 last_resolution_state=RESOLUTION_NEEDS_CLARIFICATION,
                 last_escalation_offered=False,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": "en",
+                    "resolution_state": RESOLUTION_NEEDS_CLARIFICATION,
+                    "escalation_offered": False,
+                    "quick_replies": quick_replies,
+                },
             )
             return {
                 "session_id": session_id,
@@ -1052,6 +1207,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         user_turns = sum(1 for item in history if item.get("role") == "user")
 
         if _explicit_support_request(message):
+            # Honor explicit ticket request and move directly to contact collection.
             last_entry = _last_assistant_entry(session_name)
             sources = last_entry.get("sources") or []
             metadata = {
@@ -1073,8 +1229,9 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             )
 
         if policy.is_greeting(message):
+            # Greetings are handled without RAG or escalation.
             answer = _greeting_reply(language)
-            _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
             _update_session_state(
                 session_doc,
                 low_conf_count=0,
@@ -1082,6 +1239,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 last_resolution_state=RESOLUTION_ANSWERED,
                 last_escalation_offered=False,
                 preferred_lang=language,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": language,
+                    "resolution_state": RESOLUTION_ANSWERED,
+                    "escalation_offered": False,
+                    "quick_replies": [],
+                },
             )
             return {
                 "session_id": session_id,
@@ -1098,8 +1266,9 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             }
 
         if policy.is_too_short(message):
+            # Very short messages need clarification before retrieval.
             answer = _short_reply(language)
-            _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
             clarification_count = int(getattr(session_doc, "clarification_count", 0) or 0) + 1
             _update_session_state(
                 session_doc,
@@ -1108,6 +1277,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 last_resolution_state=RESOLUTION_NEEDS_CLARIFICATION,
                 last_escalation_offered=False,
                 preferred_lang=language,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": language,
+                    "resolution_state": RESOLUTION_NEEDS_CLARIFICATION,
+                    "escalation_offered": False,
+                    "quick_replies": [],
+                },
             )
             return {
                 "session_id": session_id,
@@ -1130,6 +1310,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         skip_pre_clarify = False
 
         if quick_reply:
+            # Quick replies map to canonical queries to improve retrieval quality.
             issue_category = quick_reply["category"]
             issue_subtype = quick_reply["subtype"]
             query_for_rag = quick_reply["canonical"]
@@ -1158,6 +1339,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
 
         intent = issue_category or _detect_intent(query_for_rag) or _detect_intent(message)
         if not skip_pre_clarify:
+            # Vague intent: ask for clarification before running RAG.
             needs_clarification, intent = _needs_clarification(message)
             if needs_clarification:
                 if clarification_count >= policy_settings["max_attempts"]:
@@ -1186,7 +1368,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 clarification_count = previous_clarifications + 1
                 offer_allowed = previous_clarifications >= 1
                 escalation_offered = bool(offer_allowed)
-                _insert_message(session_name, "assistant", question, confidence=0.0, sources=[])
+                assistant_doc = _insert_message(session_name, "assistant", question, confidence=0.0, sources=[])
                 _update_session_state(
                     session_doc,
                     low_conf_count=prior_low_conf,
@@ -1195,6 +1377,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                     issue_category=intent or issue_category,
                     last_escalation_offered=escalation_offered,
                     preferred_lang=language,
+                )
+                _publish_chat_message(
+                    session_id,
+                    assistant_doc,
+                    sources=[],
+                    extra={
+                        "language": language,
+                        "resolution_state": RESOLUTION_NEEDS_CLARIFICATION,
+                        "escalation_offered": escalation_offered,
+                        "quick_replies": quick_replies,
+                    },
                 )
                 return {
                     "session_id": session_id,
@@ -1224,23 +1417,30 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         if settings["rag_api_key"]:
             headers["x-api-key"] = settings["rag_api_key"]
 
-        try:
-            rag_response = requests.post(
-                f"{settings['rag_url'].rstrip('/')}/query",
-                headers=headers,
-                json=rag_payload,
-                timeout=30,
-            )
-            rag_response.raise_for_status()
-            rag_data = rag_response.json()
-        except Exception as exc:
-            frappe.logger("ai_powered_css").warning("RAG query failed: %s", exc)
-            rag_data = {
-                "answer": "",
-                "confidence": 0.0,
-                "language": language,
-                "sources": [],
-            }
+        rag_data = None
+        # Retry RAG briefly to smooth transient network errors.
+        for attempt in range(3):
+            try:
+                rag_response = requests.post(
+                    f"{settings['rag_url'].rstrip('/')}/query",
+                    headers=headers,
+                    json=rag_payload,
+                    timeout=30,
+                )
+                rag_response.raise_for_status()
+                rag_data = rag_response.json()
+                break
+            except Exception as exc:
+                if attempt < 2:
+                    time.sleep(1)
+                    continue
+                frappe.logger("ai_powered_css").warning("RAG query failed after retries: %s", exc)
+                rag_data = {
+                    "answer": "",
+                    "confidence": 0.0,
+                    "language": language,
+                    "sources": [],
+                }
 
         answer = rag_data.get("answer") or ""
         confidence = float(rag_data.get("confidence") or 0.0)
@@ -1273,7 +1473,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         ticket_type = None
 
         if answer_ready:
-            _insert_message(session_name, "assistant", answer, confidence=confidence, sources=sources)
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=confidence, sources=sources)
             _update_session_state(
                 session_doc,
                 low_conf_count=0,
@@ -1283,6 +1483,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 issue_subtype=issue_subtype,
                 last_escalation_offered=False,
                 preferred_lang=response_lang,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=sources,
+                extra={
+                    "language": response_lang,
+                    "resolution_state": RESOLUTION_ANSWERED,
+                    "escalation_offered": False,
+                    "quick_replies": [],
+                },
             )
             return {
                 "session_id": session_id,
@@ -1303,6 +1514,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         high_risk = _is_high_risk_issue(message, intent)
         attempts = max(clarification_count, clarification_attempts)
 
+        # Escalate only after repeated low-confidence or high-risk + no sources.
         if (very_low and not sources and high_risk) or attempts >= policy_settings["max_attempts"]:
             metadata = {
                 "session_id": session_id,
@@ -1323,6 +1535,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             )
 
         if intent in ("refund", "payment") and not issue_subtype:
+            # Offer targeted quick replies for common refund/payment issues.
             question, quick_replies = _clarify_refund_payment(response_lang)
         elif intent in ("refund", "payment"):
             question, quick_replies = _detail_prompt(response_lang), []
@@ -1335,7 +1548,7 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         escalation_offered = bool(offer_allowed)
         confidence = min(confidence, 0.6)
 
-        _insert_message(session_name, "assistant", question, confidence=confidence, sources=[])
+        assistant_doc = _insert_message(session_name, "assistant", question, confidence=confidence, sources=[])
         _update_session_state(
             session_doc,
             low_conf_count=low_conf_count,
@@ -1345,6 +1558,17 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             issue_subtype=issue_subtype,
             last_escalation_offered=escalation_offered,
             preferred_lang=response_lang,
+        )
+        _publish_chat_message(
+            session_id,
+            assistant_doc,
+            sources=[],
+            extra={
+                "language": response_lang,
+                "resolution_state": RESOLUTION_NEEDS_CLARIFICATION,
+                "escalation_offered": escalation_offered,
+                "quick_replies": quick_replies,
+            },
         )
 
         return {
@@ -1366,14 +1590,77 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
 
 
 @frappe.whitelist(allow_guest=True)
-def create_ticket(session_id: str | None = None):
+def get_messages(session_id: str | None = None, since: str | None = None, limit: int | str = 20):
     previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
-    previous_user = frappe.session.user
+    previous_user = frappe.session.user or "Guest"
     frappe.flags.ignore_permissions = True
     frappe.set_user("Administrator")
     try:
         if not session_id:
             frappe.throw(_("session_id is required"))
+        session_doc = _get_session_doc(session_id)
+        if not session_doc:
+            return {"session_id": session_id, "messages": []}
+
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = 20
+        limit = max(1, min(limit, 50))
+
+        filters = {"session": session_doc.name}
+        if since:
+            try:
+                since_dt = frappe.utils.get_datetime(since)
+                filters["creation"] = (">", since_dt)
+            except Exception:
+                pass
+
+        rows = frappe.get_all(
+            "AI CSS Chat Message",
+            filters=filters,
+            fields=["name", "role", "content", "confidence", "sources_json", "creation"],
+            order_by="creation asc",
+            limit=limit,
+            ignore_permissions=True,
+        )
+        messages = []
+        for row in rows:
+            try:
+                sources = json.loads(row.get("sources_json") or "[]")
+            except Exception:
+                sources = []
+            messages.append(
+                {
+                    "id": row.get("name"),
+                    "role": row.get("role"),
+                    "content": row.get("content"),
+                    "confidence": row.get("confidence"),
+                    "sources": sources,
+                    "created_at": row.get("creation"),
+                }
+            )
+        return {"session_id": session_id, "messages": messages}
+    finally:
+        frappe.flags.ignore_permissions = previous_ignore
+        frappe.set_user(previous_user)
+
+
+@frappe.whitelist(allow_guest=True)
+def create_ticket(
+    session_id: str | None = None,
+    customer_name: str | None = None,
+    customer_email: str | None = None,
+    customer_phone: str | None = None,
+):
+    previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
+    previous_user = frappe.session.user or "Guest"
+    frappe.flags.ignore_permissions = True
+    frappe.set_user("Administrator")
+    try:
+        if not session_id:
+            frappe.throw(_("session_id is required"))
+        name, email, phone = _normalize_contact(customer_name, customer_email, customer_phone)
         session_doc = _get_session_doc(session_id)
         if not session_doc:
             frappe.throw(_("session not found"))
@@ -1384,9 +1671,7 @@ def create_ticket(session_id: str | None = None):
         elif allow_todo:
             doctype = "ToDo"
         else:
-            frappe.throw(
-                _("Ticketing is not enabled. Start the official Helpdesk profile to enable HD Ticket creation.")
-            )
+            frappe.throw(_("Ticketing is not enabled. Ensure Helpdesk is running."))
 
         history = _fetch_history(session_doc.name, limit=20)
         subject_text = _last_user_message(session_doc.name) or "Support request"
@@ -1401,6 +1686,9 @@ def create_ticket(session_id: str | None = None):
             "resolution_state": getattr(session_doc, "last_resolution_state", None),
             "confidence": confidence,
             "top_score": top_score,
+            "customer_name": name,
+            "customer_email": email,
+            "customer_phone": phone,
         }
 
         ticket_type, ticket_id = _create_ticket(
@@ -1411,6 +1699,9 @@ def create_ticket(session_id: str | None = None):
         return {
             "ticket_id": ticket_id,
             "ticket_type": ticket_type,
+            "customer_name": name,
+            "customer_email": email,
+            "customer_phone": phone,
         }
     finally:
         frappe.flags.ignore_permissions = previous_ignore
@@ -1420,7 +1711,7 @@ def create_ticket(session_id: str | None = None):
 @frappe.whitelist(allow_guest=True)
 def get_ticket_status(ticket_id: str | None = None, include_description: str | None = None):
     previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
-    previous_user = frappe.session.user
+    previous_user = frappe.session.user or "Guest"
     frappe.flags.ignore_permissions = True
     frappe.set_user("Administrator")
     try:
