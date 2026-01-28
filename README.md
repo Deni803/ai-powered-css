@@ -6,6 +6,7 @@ AI-powered customer support system with a Frappe Helpdesk CRM and a RAG service 
 - **Customer chat UI**: web chat page (`/support-chat`) with session history and bilingual support (EN/HI).
 - **RAG knowledge base**: Qdrant vector search + OpenAI LLM responses grounded in KB.
 - **CRM escalation**: unresolved queries create **HD Ticket** in Frappe Helpdesk (with contact capture).
+- **Source‑driven KB**: KB is built from real BookMyShow FAQ pages via `scripts/fetch_bms_kb.py`, stored as clean JSON in `data/kb/articles/`, and ingested into Qdrant.\n+  We can scale this by crawling more official help pages and running `scripts/translate_kb_hi.py` to add Hindi content before re‑ingesting to the vector DB.
 
 ## Architecture diagram (high level)
 ```
