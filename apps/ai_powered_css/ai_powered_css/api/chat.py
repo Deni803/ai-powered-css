@@ -544,10 +544,48 @@ def _extract_contact_from_text(text: str) -> tuple[str | None, str | None, str |
     phone_digits = re.sub(r"\D", "", text)
     phone = phone_digits if len(phone_digits) >= 10 else None
     name = None
+    label_match = re.search(r"(?:name|naam)\s*[:=]\s*([A-Za-z]{2,30})", text, re.IGNORECASE)
+    if label_match:
+        name = label_match.group(1)
     name_match = re.search(r"(?:my name is|i am|i'm)\s+([A-Za-z]{2,20})", text, re.IGNORECASE)
     if name_match:
         name = name_match.group(1)
     return name, email, phone
+
+
+def _extract_name_from_history(history: list[dict[str, str]]) -> str | None:
+    """Infer a user name from earlier onboarding turns (best-effort)."""
+    prompt_markers = [
+        "what’s your name",
+        "what's your name",
+        "आपका नाम क्या है",
+        "आपका नाम",
+    ]
+    for idx, item in enumerate(history):
+        if item.get("role") != "assistant":
+            continue
+        content = (item.get("content") or "").lower()
+        if not any(marker in content for marker in prompt_markers):
+            continue
+        for next_item in history[idx + 1 :]:
+            if next_item.get("role") != "user":
+                continue
+            candidate = (next_item.get("content") or "").strip()
+            if not candidate:
+                continue
+            # Accept short responses as a name (e.g., "deni").
+            if 2 <= len(candidate) <= 30 and len(candidate.split()) <= 2:
+                return candidate
+            break
+    # Fallback: look for explicit "my name is" in any user message.
+    for item in history:
+        if item.get("role") != "user":
+            continue
+        content = item.get("content") or ""
+        match = re.search(r"(?:my name is|i am|i'm)\s+([A-Za-z]{2,20})", content, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
 
 
 def _count_clarification_prompts(history: list[dict[str, str]]) -> int:
@@ -1182,11 +1220,14 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         if last_state == RESOLUTION_UNRESOLVED:
             name, email, phone = _extract_contact_from_text(message)
             if email or phone:
-                name, email, phone = _normalize_contact(name, email, phone)
                 last_entry = _last_assistant_entry(session_name)
                 sources = last_entry.get("sources") or []
                 confidence = last_entry.get("confidence")
                 top_score = _top_score_from_sources(sources)
+                history = _fetch_history(session_name, limit=20)
+                if not name:
+                    name = _extract_name_from_history(history)
+                name, email, phone = _normalize_contact(name, email, phone)
                 metadata = {
                     "session_id": session_id,
                     "language": language,
@@ -1197,7 +1238,6 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                     "customer_email": email,
                     "customer_phone": phone,
                 }
-                history = _fetch_history(session_name, limit=20)
                 ticket_type, ticket_id = _create_ticket_for_session(history, message, sources, metadata=metadata)
                 answer = _ticket_created_reply(language, ticket_id)
                 assistant_doc = _insert_message(session_name, "assistant", answer, confidence=0.0, sources=sources)
@@ -1827,6 +1867,8 @@ def create_ticket(
             frappe.throw(_("Ticketing is not enabled. Ensure Helpdesk is running."))
 
         history = _fetch_history(session_doc.name, limit=20)
+        if not name:
+            name = _extract_name_from_history(history)
         subject_text = _last_user_message(session_doc.name) or "Support request"
         ticket_subject = _build_ticket_subject(subject_text)
         last_entry = _last_assistant_entry(session_doc.name)
