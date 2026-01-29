@@ -40,6 +40,9 @@ _ROMAN_HI_FUNCTION_WORDS = {
     "par",
     "mein",
     "liye",
+    "madad",
+    "chahiye",
+    "sahiye",
     "bana",
     "do",
     "hai",
@@ -1757,6 +1760,10 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
             response_lang = "hi"
         else:
             response_lang = "en"
+
+        if not answer:
+            # Avoid blank answers if the upstream RAG call failed or returned empty content.
+            answer = _clarify_reply(response_lang)
 
         answer = _sanitize_answer(answer, response_lang)
         sources, top_score, sources_usable = _evaluate_sources(sources, policy_settings["min_top_score"])
