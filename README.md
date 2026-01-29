@@ -30,6 +30,10 @@ Decision Engine
   `--> UNRESOLVED (contact capture -> HD Ticket)
 ```
 
+## Architecture
+- Detailed diagrams and implementation-accurate flow: `docs/architecture/ai-chatbot-architecture.md`
+- System overview: `docs/architecture/system-overview.md`
+
 ## Tech stack
 - **Framework**: Frappe + Helpdesk app
 - **DB**: PostgreSQL (PRD default)
@@ -94,6 +98,8 @@ Set in `infra/.env`:
 - `TOP_K` (default 5)
 - `DB_PASSWORD`, `DB_ROOT_USERNAME`, `DB_NAME` (Postgres)
 
+## Caching
+Not implemented yet for RAG responses. Each chat query calls the RAG service and OpenAI. The UI stores chat messages in browser `localStorage` for session continuity, and Frappe uses Redis for internal queues/sessions, but there is no semantic response or retrieval cache in the application code.
 ## Testing
 ```bash
 make verify-full
@@ -110,6 +116,10 @@ Sample test scenarios (PRD-aligned):
 - Some BookMyShow help pages are JS-rendered; fetcher may capture limited text.
 - OpenAI rate limits can cause low-confidence safe responses.
 - If `/helpdesk` shows “User None is disabled”, clear cookies or use incognito.
+
+## Future scope
+1. **Semantic caching (L1 response + L2 retrieval)**: cache keys based on normalized query + language + KB version; TTL-based expiry; invalidate on KB re-ingest; expose cache hit metrics.
+2. **Verifier/critic pass**: run a lightweight QA step after generation to detect unsupported claims before returning ANSWERED.
 
 ## Repository structure
 ```
