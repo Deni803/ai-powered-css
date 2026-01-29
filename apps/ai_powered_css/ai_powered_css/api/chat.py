@@ -513,8 +513,8 @@ def _offer_ticket_prompt(lang: str) -> str:
 
 def _contact_request_prompt(lang: str) -> str:
     if lang == "hi":
-        return "टिकट बनाने के लिए कृपया अपना ईमेल या फोन नंबर साझा करें (इनमें से कोई एक)."
-    return "To create a support ticket, please share your email or phone number (either one is enough)."
+        return "टिकट बनाने के लिए कृपया अपना ईमेल या फोन नंबर चैट में लिखें (इनमें से कोई एक)."
+    return "To create a support ticket, please type your email or phone number here in chat (either one is enough)."
 
 
 def _normalize_contact(
@@ -1105,7 +1105,8 @@ def _create_ticket(
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str, str]:
     # Escalate privileges for guest ticket creation while preserving the original user context.
-    current_user = frappe.session.user
+    # Ensure we never restore to a None user; Frappe expects a real session user.
+    current_user = frappe.session.user or "Guest"
     previous_ignore = getattr(frappe.flags, "ignore_permissions", False)
     try:
         frappe.flags.ignore_permissions = True
@@ -1170,6 +1171,7 @@ def _create_ticket(
         return doctype, doc.name
     finally:
         frappe.set_user(current_user)
+        frappe.local.session.user = current_user
         frappe.flags.ignore_permissions = previous_ignore
 
 
@@ -1220,25 +1222,41 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
         if last_state == RESOLUTION_UNRESOLVED:
             name, email, phone = _extract_contact_from_text(message)
             if email or phone:
-                last_entry = _last_assistant_entry(session_name)
-                sources = last_entry.get("sources") or []
-                confidence = last_entry.get("confidence")
-                top_score = _top_score_from_sources(sources)
-                history = _fetch_history(session_name, limit=20)
-                if not name:
-                    name = _extract_name_from_history(history)
-                name, email, phone = _normalize_contact(name, email, phone)
-                metadata = {
-                    "session_id": session_id,
-                    "language": language,
-                    "resolution_state": RESOLUTION_UNRESOLVED,
-                    "confidence": confidence,
-                    "top_score": top_score,
-                    "customer_name": name,
-                    "customer_email": email,
-                    "customer_phone": phone,
-                }
-                ticket_type, ticket_id = _create_ticket_for_session(history, message, sources, metadata=metadata)
+                prev_user = frappe.session.user
+                prev_ignore = getattr(frappe.flags, "ignore_permissions", False)
+                prev_local_ignore = getattr(frappe.local.flags, "ignore_permissions", False)
+                frappe.flags.ignore_permissions = True
+                frappe.local.flags.ignore_permissions = True
+                frappe.set_user("Administrator")
+                frappe.local.session.user = "Administrator"
+                frappe.session.user = "Administrator"
+                try:
+                    last_entry = _last_assistant_entry(session_name)
+                    sources = last_entry.get("sources") or []
+                    confidence = last_entry.get("confidence")
+                    top_score = _top_score_from_sources(sources)
+                    history = _fetch_history(session_name, limit=20)
+                    if not name:
+                        name = _extract_name_from_history(history)
+                    name, email, phone = _normalize_contact(name, email, phone)
+                    metadata = {
+                        "session_id": session_id,
+                        "language": language,
+                        "resolution_state": RESOLUTION_UNRESOLVED,
+                        "confidence": confidence,
+                        "top_score": top_score,
+                        "customer_name": name,
+                        "customer_email": email,
+                        "customer_phone": phone,
+                    }
+                    ticket_type, ticket_id = _create_ticket_for_session(history, message, sources, metadata=metadata)
+                finally:
+                    frappe.flags.ignore_permissions = prev_ignore
+                    frappe.local.flags.ignore_permissions = prev_local_ignore
+                    frappe.set_user(prev_user)
+                    frappe.local.session.user = prev_user
+                    frappe.session.user = prev_user
+
                 answer = _ticket_created_reply(language, ticket_id)
                 assistant_doc = _insert_message(session_name, "assistant", answer, confidence=0.0, sources=sources)
                 _update_session_state(

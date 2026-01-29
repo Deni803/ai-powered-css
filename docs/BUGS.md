@@ -32,6 +32,12 @@
 ### Module 4.6
 - Helpdesk install failed on Postgres with `smallint = boolean` SLA query error; patched Helpdesk SLA filters to compare integer flags on Postgres.
 
+### Module 4.7
+- Helpdesk UI ticket creation returned 404 due to Postgres boolean comparisons and MySQL full-text SQL in Helpdesk queries; fixed via Postgres-safe overrides for filterable fields, ticket customizations, and similar ticket lookup.
+- Polling requests logged "User None is disabled" after guest ticket creation; restored session user to Guest after privileged ticket inserts.
+- Helpdesk install failed on Postgres due to FULLTEXT index creation (`SHOW INDEX`); init now skips FTS index setup on Postgres.
+- Guest ticket creation failed due to missing SLA defaults / priorities; init now seeds Helpdesk defaults and apply_sla ignores missing SLA on Postgres.
+
 ### Module 4.7+
 - Contact form input was clearing/resetting; moved contact capture into chat flow.
 - Auto-scroll forced the view to bottom while reading older messages; now only auto-scrolls if near bottom.

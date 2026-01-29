@@ -99,45 +99,34 @@ if path.exists():
     text = path.read_text()
     updated = text.replace("QBSla.enabled == True", "QBSla.enabled == 1")
     updated = updated.replace("QBSla.default_sla == False", "QBSla.default_sla == 0")
-    if "def get_default() -> Document:" in updated:
-        # Make default SLA optional (None) and ignore permissions for guest-created tickets.
-        old_block = (
-            "def get_default() -> Document:\\n"
-            "    \\\"\\\"\\\"\\n"
-            "    Get default Service Level Agreement\\n\\n"
-            "    :return: Default SLA\\n"
-            "    \\\"\\\"\\\"\\n"
-            "    return frappe.get_last_doc(\\n"
-            "        DOCTYPE,\\n"
-            "        filters={\\n"
-            "            \\\"enabled\\\": True,\\n"
-            "            \\\"default_sla\\\": True,\\n"
-            "        },\\n"
-            "    )\\n"
-        )
+    # Replace get_default() body with a Postgres-safe, permission-agnostic version.
+    marker_start = "def get_default()"
+    marker_end = "def convert_to_seconds"
+    if marker_start in updated and marker_end in updated:
+        before, rest = updated.split(marker_start, 1)
+        _, after = rest.split(marker_end, 1)
         new_block = (
-            "def get_default() -> Document | None:\\n"
-            "    \\\"\\\"\\\"\\n"
-            "    Get default Service Level Agreement\\n\\n"
-            "    :return: Default SLA\\n"
-            "    \\\"\\\"\\\"\\n"
-            "    try:\\n"
-            "        return frappe.get_last_doc(\\n"
-            "            DOCTYPE,\\n"
-            "            filters={\\n"
-            "                \\\"enabled\\\": 1,\\n"
-            "                \\\"default_sla\\\": 1,\\n"
-            "            },\\n"
-            "            ignore_permissions=True,\\n"
-            "        )\\n"
-            "    except Exception:\\n"
-            "        return None\\n"
+            "def get_default() -> Document | None:\n"
+            "    \"\"\"\n"
+            "    Get default Service Level Agreement\n\n"
+            "    :return: Default SLA\n"
+            "    \"\"\"\n"
+            "    try:\n"
+            "        return frappe.get_last_doc(\n"
+            "            DOCTYPE,\n"
+            "            filters={\n"
+            "                \"enabled\": 1,\n"
+            "                \"default_sla\": 1,\n"
+            "            },\n"
+            "            ignore_permissions=True,\n"
+            "        )\n"
+            "    except Exception:\n"
+            "        return None\n\n"
         )
-        if old_block in updated:
-            updated = updated.replace(old_block, new_block)
+        updated = before + new_block + marker_end + after
     if updated != text:
         path.write_text(updated)
-        print("Patched Helpdesk SLA boolean filters for Postgres.")
+        print("Patched Helpdesk SLA defaults for Postgres.")
 
 sla_path = bench_dir / "apps/helpdesk/helpdesk/helpdesk/doctype/hd_service_level_agreement/hd_service_level_agreement.py"
 if sla_path.exists():
@@ -154,14 +143,45 @@ ticket_path = bench_dir / "apps/helpdesk/helpdesk/helpdesk/doctype/hd_ticket/hd_
 if ticket_path.exists():
     text = ticket_path.read_text()
     updated = text.replace("self.key = uuid.uuid4()", "self.key = str(uuid.uuid4())")
-    if "def apply_sla(self):" in updated:
-        updated = updated.replace(
-            'if sla := frappe.get_last_doc("HD Service Level Agreement", {"name": self.sla}, ignore_permissions=True):\n            sla.apply(self)\n',
-            "try:\n            if not self.sla:\n                return\n            sla = frappe.get_last_doc(\"HD Service Level Agreement\", {\"name\": self.sla})\n        except Exception:\n            return\n        if sla:\n            sla.apply(self)\n",
+    if "def apply_sla(self):" in updated and "def set_default_status" in updated:
+        before, rest = updated.split("def apply_sla(self):", 1)
+        _, after = rest.split("def set_default_status", 1)
+        apply_block = (
+            "def apply_sla(self):\n"
+            "        \"\"\"\n"
+            "        Apply SLA if set.\n"
+            "        \"\"\"\n"
+            "        try:\n"
+            "            if not self.sla:\n"
+            "                return\n"
+            "            sla = frappe.get_last_doc(\"HD Service Level Agreement\", {\"name\": self.sla}, ignore_permissions=True)\n"
+            "        except Exception:\n"
+            "            return\n"
+            "        if sla:\n"
+            "            sla.apply(self)\n\n"
+            "    def set_default_status"
         )
-if updated != text:
+        updated = before + apply_block + after
+    if updated != text:
         ticket_path.write_text(updated)
         print("Patched HD Ticket key to string UUID for Postgres.")
+
+# Patch Helpdesk install: skip FULLTEXT index creation on Postgres.
+install_path = bench_dir / "apps/helpdesk/helpdesk/setup/install.py"
+if install_path.exists():
+    text = install_path.read_text()
+    marker = "def add_fts_index():"
+    if marker in text and "POSTGRES_SKIP_FTS" not in text:
+        injected = (
+            "def add_fts_index():\n"
+            "    # POSTGRES_SKIP_FTS: FULLTEXT indexes are MySQL-specific.\n"
+            "    import frappe\n"
+            "    if frappe.db.db_type == \"postgres\":\n"
+            "        return\n"
+        )
+        text = text.replace(marker, injected)
+        install_path.write_text(text)
+        print("Patched Helpdesk FTS install for Postgres.")
 PY
 
 if [ ! -d "${BENCH_DIR}/sites/${SITE_NAME}" ]; then
