@@ -6,7 +6,7 @@ AI-powered customer support system with a Frappe Helpdesk CRM and a RAG service 
 - **Customer chat UI**: web chat page (`/support-chat`) with session history and bilingual support (EN/HI).
 - **RAG knowledge base**: Qdrant vector search + OpenAI LLM responses grounded in KB.
 - **CRM escalation**: unresolved queries create **HD Ticket** in Frappe Helpdesk (with contact capture).
-- **Source‑driven KB**: KB is built from real BookMyShow FAQ pages via `scripts/fetch_bms_kb.py`, stored as clean JSON in `data/kb/articles/`, and ingested into Qdrant.\n+  We can scale this by crawling more official help pages and running `scripts/translate_kb_hi.py` to add Hindi content before re‑ingesting to the vector DB.
+- **Source‑driven KB**: KB is built from real BookMyShow FAQ pages via `scripts/fetch_bms_kb.py`, stored as clean JSON in `data/kb/articles/`, and ingested into Qdrant. We can scale this by crawling more official help pages and running `scripts/translate_kb_hi.py` to add Hindi content before re‑ingesting to the vector DB.
 
 ## Architecture diagram (high level)
 ```
@@ -72,10 +72,12 @@ make init-kb         # ingest into Qdrant
 ### Access chat interface
 - Local: http://localhost:8000/support-chat
 - Deployed: https://bookyourshow.duckdns.org/support-chat
+- Support Chat (public): https://bookyourshow.duckdns.org/support-chat
 
 ### View tickets in CRM
 - Local: http://localhost:8000/helpdesk/tickets
 - Deployed: https://bookyourshow.duckdns.org/helpdesk/tickets
+- Helpdesk / CRM UI: https://bookyourshow.duckdns.org/login
 
 ### Add knowledge base articles
 - Edit or add JSON files in `data/kb/articles/`
@@ -97,6 +99,13 @@ Set in `infra/.env`:
 - `CONF_THRESHOLD` (default 0.7)
 - `TOP_K` (default 5)
 - `DB_PASSWORD`, `DB_ROOT_USERNAME`, `DB_NAME` (Postgres)
+
+## Deployment (EC2 + Nginx + Let's Encrypt)
+We run the public demo behind **Nginx** with **Let's Encrypt** certificates. The canonical Nginx config is stored at `infra/nginx.conf` and is currently deployed at:
+```
+/etc/nginx/sites-available/ai-css.conf
+```
+See `infra/README.md` for the exact config, proxy routing, and Certbot commands used to issue/renew TLS certificates.
 
 ## Caching
 Not implemented yet for RAG responses. Each chat query calls the RAG service and OpenAI. The UI stores chat messages in browser `localStorage` for session continuity, and Frappe uses Redis for internal queues/sessions, but there is no semantic response or retrieval cache in the application code.
@@ -128,6 +137,7 @@ services/   RAG service (FastAPI)
 infra/      docker-compose + env templates
 scripts/    helper scripts (fetch/translate/init KB, tests)
 data/kb/    KB sources and parsed articles
+test_output/ Screenshot containg test output
 ```
 
 ## Technical documentation
