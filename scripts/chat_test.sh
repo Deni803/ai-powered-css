@@ -155,6 +155,37 @@ if resp.get("ticket_id"):
     raise SystemExit("ERROR: greeting should not create ticket")
 PY
 
+# Closing test
+SESSION_ID="${SESSION_BASE}-closing"
+export SESSION_ID
+QUERY_CLOSING=$(python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "session_id": os.environ.get("SESSION_ID", ""),
+  "message": "thank you this helps",
+  "lang_hint": ""
+}))
+PY
+)
+request_json "$API_URL" "$QUERY_CLOSING"
+if [ "$(cat /tmp/chat_last_code.txt)" != "200" ]; then
+  echo "ERROR: chat closing query failed"
+  cat /tmp/chat_last_body.json
+  exit 1
+fi
+print_response "CHAT_CLOSING"
+python3 - <<'PY'
+import json
+with open("/tmp/chat_last_body.json", "r", encoding="utf-8") as f:
+    body = json.load(f)
+resp = body.get("message", body)
+answer = (resp.get("answer") or "").lower()
+if resp.get("ticket_id"):
+    raise SystemExit("ERROR: closing should not create ticket")
+if "thank you" not in answer and "धन्यवाद" not in answer:
+    raise SystemExit("ERROR: closing response did not include a closing greeting")
+PY
+
 # Auto English: refund status
 SESSION_ID="${SESSION_BASE}-en-auto"
 export SESSION_ID

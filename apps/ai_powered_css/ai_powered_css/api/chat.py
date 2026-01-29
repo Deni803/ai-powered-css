@@ -148,6 +148,44 @@ _DOMAIN_WORDS = set().union(
     },
 )
 
+_CLOSING_PATTERNS_EN = (
+    r"\bthank you\b",
+    r"\bthanks\b",
+    r"\bthx\b",
+    r"\bappreciate\b",
+    r"\bthat helps\b",
+    r"\bthis helps\b",
+    r"\bissue resolved\b",
+    r"\bresolved\b",
+    r"\bsolved\b",
+    r"\ball good\b",
+    r"\bno further help\b",
+)
+_CLOSING_PATTERNS_HI = (
+    r"धन्यवाद",
+    r"थैंक यू",
+    r"हो गया",
+    r"समाधान हो गया",
+    r"मदद मिली",
+    r"सब ठीक",
+    r"ठीक है धन्यवाद",
+)
+_CLOSING_NEGATIVE_PATTERNS = (
+    r"\bbut\b",
+    r"\bstill\b",
+    r"\bnot\b",
+    r"\bneed help\b",
+    r"\bhelp me\b",
+    r"\bissue\b",
+    r"\bproblem\b",
+    r"\bpending\b",
+    r"नहीं",
+    r"लेकिन",
+    r"पर",
+    r"समस्या",
+    r"मदद चाहिए",
+)
+
 _ISSUE_PATTERNS = [
     {"amount", "deducted"},
     {"amount", "confirmation"},
@@ -292,6 +330,26 @@ def _explicit_support_request(text: str) -> bool:
     return _has_any(text, _SUPPORT_REQUEST_WORDS)
 
 
+def _is_closing_message(text: str) -> bool:
+    cleaned = text.strip().lower()
+    if not cleaned:
+        return False
+    if _explicit_support_request(text):
+        return False
+    if "?" in text:
+        return False
+    for pattern in _CLOSING_NEGATIVE_PATTERNS:
+        if re.search(pattern, cleaned, flags=re.IGNORECASE):
+            return False
+    for pattern in _CLOSING_PATTERNS_EN:
+        if re.search(pattern, cleaned, flags=re.IGNORECASE):
+            return True
+    for pattern in _CLOSING_PATTERNS_HI:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return True
+    return False
+
+
 def _is_off_topic(text: str) -> bool:
     """Detect queries outside the support domain to avoid random KB answers."""
     if _detect_intent(text):
@@ -339,6 +397,12 @@ def _greeting_reply(lang: str) -> str:
     if lang == "hi":
         return "नमस्ते! मैं आपकी बुकिंग, रिफंड, या पेमेंट से जुड़ी मदद कर सकता हूँ। आप किस बारे में पूछना चाहेंगे?"
     return "Hi! I can help with bookings, refunds, or payments. What would you like to know?"
+
+
+def _closing_reply(lang: str) -> str:
+    if lang == "hi":
+        return "धन्यवाद! BookYourShow में मदद करने का अवसर देने के लिए आभारी हूँ। अगर आगे कोई सहायता चाहिए, तो बेझिझक बताइए।"
+    return "Thank you for choosing BookYourShow! I’m glad I could help. If you need anything else, just let me know."
 
 
 def _short_reply(lang: str) -> str:
@@ -1431,6 +1495,43 @@ def send_message(session_id: str | None = None, message: str | None = None, lang
                 sources=sources,
                 metadata=metadata,
             )
+
+        if _is_closing_message(message):
+            # Closing acknowledgements end the conversation without RAG or escalation.
+            answer = _closing_reply(language)
+            assistant_doc = _insert_message(session_name, "assistant", answer, confidence=None, sources=[])
+            _update_session_state(
+                session_doc,
+                low_conf_count=0,
+                clarification_count=0,
+                last_resolution_state=RESOLUTION_ANSWERED,
+                last_escalation_offered=False,
+                preferred_lang=language,
+            )
+            _publish_chat_message(
+                session_id,
+                assistant_doc,
+                sources=[],
+                extra={
+                    "language": language,
+                    "resolution_state": RESOLUTION_ANSWERED,
+                    "escalation_offered": False,
+                    "quick_replies": [],
+                },
+            )
+            return {
+                "session_id": session_id,
+                "answer": answer,
+                "confidence": 1.0,
+                "language": language,
+                "sources": [],
+                "resolution_state": RESOLUTION_ANSWERED,
+                "quick_replies": [],
+                "escalated": False,
+                "escalation_offered": False,
+                "ticket_id": None,
+                "ticket_type": None,
+            }
 
         if policy.is_greeting(message):
             # Greetings are handled without RAG or escalation.
